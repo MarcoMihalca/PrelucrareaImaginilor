@@ -88,6 +88,16 @@ class Aplicatie(tk.Tk):
         tools_menu.add_separator()
         tools_menu.add_command(label="Afisare etichetare obiecte", command=self.aplicare_etichetare)
         tools_menu.add_command(label="Afisare etichetare obiecte cu selectie", command=self.aplicare_etichetare_cu_selectie)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Transformata Fourier (Spectru de Frecvente)", command=self.aplicare_fourier_transform)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Filtru de Mediere (3x3)", command=self.aplicare_filtru_mediere)
+        tools_menu.add_command(label="Filtru Median (3x3)", command=self.aplicare_filtru_median)
+        tools_menu.add_command(label="Filtru de Minim (3x3)", command=self.aplicare_filtru_minim)
+        tools_menu.add_command(label="Filtru de Maxim (3x3)", command=self.aplicare_filtru_maxim)
+        tools_menu.add_command(label="Filtru de Accentuare (3x3)", command=self.aplicare_filtru_accentuare)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Dithering Floyd-Steinberg", command=self.aplicare_floyd_steinberg)
 
         
         # Il atasam la ACEEASI bara principala, langa File
@@ -342,13 +352,213 @@ class Aplicatie(tk.Tk):
         except Exception as e:
             self.afiseaza_eroare(str(e))
 
-    # De gasit un use la asta
+    def aplicare_transformata_fourier(self):
+        """Aplica Transformata Fourier Discreta (DFT)."""
+        def logica(img):
+            # DFT pe grayscale
+            gray = np.mean(img, axis=2)
+            magn, _ = self.dft_2d(gray)
+            # Normalizam magnitudinea pentru afisare (log scale)
+            magn_log = np.log(1 + magn)
+            magn_norm = (magn_log / np.max(magn_log) * 255).astype(np.uint8)
+            return np.stack([magn_norm]*3, axis=-1)
 
-    # def submeniu_alb_negru(self):
-    #     self.curata_ecranul()
-    #     tk.Label(self, text="Alege o imagine pentru conversie in alb si negru", font=("Arial", 14)).pack(pady=20)
-    #     tk.Button(self, text="Deschide Imagine", command=self.deschide_imagine_albNegru).pack(pady=10)
-    #     self.adauga_buton_inapoi()
+        self.incarcare_si_procesare_imagine(logica, "Transformata Fourier (Magnitudine)", "Original", "Spectru DFT")
+
+    def aplicare_conversie_RGB_in_YUV(self):
+        """Converteste imaginea in spatiul YUV."""
+        def logica(img):
+            h, w = img.shape[:2]
+            yuv = np.zeros_like(img, dtype=np.uint8)
+            for y in range(h):
+                for x in range(w):
+                    r, g, b = img[y, x].astype(float)
+                    Y = 0.299 * r + 0.587 * g + 0.114 * b
+                    U = -0.147 * r - 0.289 * g + 0.436 * b + 128
+                    V = 0.615 * r - 0.515 * g - 0.100 * b + 128
+                    yuv[y, x] = [np.clip(Y, 0, 255), np.clip(U, 0, 255), np.clip(V, 0, 255)]
+            return yuv
+        self.incarcare_si_procesare_imagine(logica, "Conversie RGB -> YUV", "Original", "YUV (Y=R, U=G, V=B)")
+
+    def aplicare_conversie_RGB_in_YCbCr(self):
+        """Converteste imaginea in spatiul YCbCr."""
+        def logica(img):
+            h, w = img.shape[:2]
+            ycc = np.zeros_like(img, dtype=np.uint8)
+            for y in range(h):
+                for x in range(w):
+                    r, g, b = img[y, x].astype(float)
+                    Y = 16 + (65.481 * r + 128.553 * g + 24.966 * b) / 256
+                    Cb = 128 + (-37.797 * r - 74.203 * g + 112.0 * b) / 256
+                    Cr = 128 + (112.0 * r - 93.786 * g - 18.214 * b) / 256
+                    ycc[y, x] = [np.clip(Y, 0, 255), np.clip(Cb, 0, 255), np.clip(Cr, 0, 255)]
+            return ycc
+        self.incarcare_si_procesare_imagine(logica, "Conversie RGB -> YCbCr", "Original", "YCbCr")
+
+    # ================================================================================================
+    # HELPER FUNCTIONS - Reduce DUPLICARE DE COD in functiile de procesare
+    # ================================================================================================
+
+    def verificare_daca_exista_imagine_incarcata(self):
+        """
+        PATTERN REPETAT: Verifica daca avem imagine in memorie, daca nu, o deschide.
+        Aceasta functie se foloseste la inceputul aproape fiecarei functii de procesare.
+        
+        Returns:
+            tuple (h, w) dacă are succes, None dacă utilizator anulează
+        """
+        if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
+            result = self.procesare_imagine()
+            if result is None:
+                return None
+        
+        h, w = self.cv_img_rgb.shape[:2]
+        return h, w
+
+    def matrice_la_imagine(self, image):
+        """
+        PATTERN REPETAT: Converteste matrice RGB in PhotoImage (se repeta ~20 de ori!)
+        
+        Args:
+            image: matrice numpy de forma (h, w, 3) cu valori 0-255
+        
+        Returns:
+            tuple (photo_image, width, height) gata pentru afisare
+        """
+        h, w = image.shape[:2]
+        photo = tk.PhotoImage(width=w, height=h)
+        
+        rows = []
+        for y in range(h):
+            line = []
+            for x in range(w):
+                r, g, b = image[y, x]
+                line.append(f"#{r:02x}{g:02x}{b:02x}")
+            rows.append(f"{{{ ' '.join(line) }}}")
+        
+        photo.put(" ".join(rows))
+        return photo, w, h
+
+    def afisare_rezultat_dublu(self, img_orig, img_procesat, titlu, eticheta_orig="Original", eticheta_proc="Procesat"):
+        """
+        PATTERN REPETAT: Afiseaza 2 imagini side-by-side (se repeta in ~15 functii!)
+        Gestioneaza TOTI pasii: curatare ecran, container, layout, butoane
+        
+        Args:
+            img_orig: matrice originala
+            img_procesat: matrice procesata
+            titlu: titlul fereastrei (string)
+            eticheta_orig: eticheta pentru imagine originala
+            eticheta_proc: eticheta pentru imagine procesat
+        """
+        h, w = img_orig.shape[:2]
+        
+        # Convertim ambele imagini
+        photo_orig, w, h = self.matrice_la_imagine(img_orig)
+        photo_proc, _, _ = self.matrice_la_imagine(img_procesat)
+        
+        # Curatam ecranul
+        self.curata_ecranul()
+        
+        # Cream layout
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Titlu
+        tk.Label(container, text=titlu, font=("Arial", 18, "bold")).pack(pady=10)
+        
+        # Frame imagini side-by-side
+        img_frame = tk.Frame(container)
+        img_frame.pack(pady=10)
+        
+        # Imagine originala
+        label_orig = tk.Label(img_frame, image=photo_orig)
+        label_orig.image = photo_orig  # Pastreaza referinta
+        label_orig.pack(side="left", padx=10)
+        
+        # Imagine procesata
+        label_proc = tk.Label(img_frame, image=photo_proc)
+        label_proc.image = photo_proc  # Pastreaza referinta
+        label_proc.pack(side="left", padx=10)
+        
+        # Etichete
+        tk.Label(container, text=eticheta_orig, font=("Arial", 12), fg="gray").pack()
+        tk.Label(container, text=eticheta_proc, font=("Arial", 12), fg="gray").pack()
+        
+        # Buton inapoi
+        self.adauga_buton_inapoi()
+
+    def afisare_rezultat_triplu(self, img1, img2, img3, titlu, etichete):
+        """
+        PATTERN REPETAT: Afiseaza 3 imagini (folosit in grayscale_3exemplare)
+        Gestioneaza layout cu 3 imagini alaturi
+        
+        Args:
+            img1, img2, img3: matricele celor 3 imagini
+            titlu: titlul fereastrei
+            etichete: lista [eticheta1, eticheta2, eticheta3]
+        """
+        h, w = img1.shape[:2]
+        
+        photo1, w, h = self.matrice_la_imagine(img1)
+        photo2, _, _ = self.matrice_la_imagine(img2)
+        photo3, _, _ = self.matrice_la_imagine(img3)
+        
+        self.curata_ecranul()
+        
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        
+        tk.Label(container, text=titlu, font=("Arial", 18, "bold")).pack(pady=10)
+        
+        # Frame imagini
+        img_frame = tk.Frame(container)
+        img_frame.pack(pady=10)
+        
+        # Afiseaza 3 imagini
+        for i, (photo, eticheta) in enumerate([(photo1, etichete[0]), (photo2, etichete[1]), (photo3, etichete[2])]):
+            frame_col = tk.Frame(img_frame)
+            frame_col.pack(side="left", padx=5)
+            
+            label = tk.Label(frame_col, image=photo)
+            label.image = photo
+            label.pack()
+            
+            tk.Label(frame_col, text=eticheta, font=("Arial", 10), fg="gray").pack()
+        
+        self.adauga_buton_inapoi()
+
+    def incarcare_si_procesare_imagine(self, functie_procesare, titlu, eticheta_orig="Original", eticheta_proc="Procesat"):
+        """
+        WRAPPER UNIVERSAL: Combina pasii comuni ai ~15 functii de procesare.
+        
+        Args:
+            functie_procesare: functia care proceseaza imaginea (trebuie sa ia imaginea si sa returneze rezultatul)
+            titlu: titlul fereastrei de rezultat
+            eticheta_orig: eticheta pentru original
+            eticheta_proc: eticheta pentru procesat
+        
+        Exemplu de utilizare:
+            def aplicare_filtru_median_simplificat(self):
+                try:
+                    self.incarcare_si_procesare_imagine(
+                        self.filtru_median,
+                        "Filtru Median - Before & After",
+                        "Original", 
+                        "Filtrat"
+                    )
+                except Exception as e:
+                    self.afiseaza_eroare(str(e))
+        """
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None:
+            return
+        
+        try:
+            img_procesat = functie_procesare(self.cv_img_rgb)
+            self.afisare_rezultat_dublu(self.cv_img_rgb, img_procesat, titlu, eticheta_orig, eticheta_proc)
+        except Exception as e:
+            self.afiseaza_eroare(str(e))
 
     def aplicare_grayscale_3exemplare(self):
         """
@@ -430,133 +640,6 @@ class Aplicatie(tk.Tk):
 
         except Exception as e:
             self.afiseaza_eroare(str(e))
-
-    def aplicare_conversie_RGB_in_YUV(self):
-        """
-        Aplica conversia RGB -> YUV folosind formulele din laborator.
-        """
-        try:
-            # Verificam daca avem deja o imagine in memorie
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                # Daca nu, deschidem o imagine noua
-                result = self.procesare_imagine()
-                if result is None:
-                    return
-            
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-            
-            # Cream obiectul PhotoImage pentru rezultatul YUV
-            self.img_yuv = tk.PhotoImage(width=w, height=h)
-
-            rows_yuv = []
-
-            for y in range(h):
-                line_yuv = []
-                for x in range(w):
-                    r, g, b = cv_img_rgb[y, x].astype(float)
-
-                    # ==========================================
-                    # FORMULE YUV
-                    # ==========================================
-                    y_val = 0.299 * r + 0.587 * g + 0.114 * b
-                    
-                    # Adaugam +128 la U si V pentru a le aduce in intervalul vizibil (0-255)
-                    # deoarece diferenta (r - y_val) poate fi un numar negativ!
-                    u_val = 0.74 * (r - y_val) + 0.27 * (b - y_val) + 128
-                    v_val = 0.48 * (r - y_val) + 0.41 * (b - y_val) + 128
-
-                    # Corectam valorile sa fie strict intre 0 si 255
-                    y_int = int(max(0, min(255, y_val)))
-                    u_int = int(max(0, min(255, u_val)))
-                    v_int = int(max(0, min(255, v_val)))
-
-                    # Asamblam pixelul in format hexazecimal
-                    line_yuv.append(f"#{y_int:02x}{u_int:02x}{v_int:02x}")
-
-                # Punem tot randul in formatul cerut de Tkinter
-                rows_yuv.append(f"{{{ ' '.join(line_yuv) }}}")
-
-            # "Desenam" imaginea
-            self.img_yuv.put(" ".join(rows_yuv))
-
-            # ==========================================
-            # AFISARE PE ECRAN (Centrat)
-            # ==========================================
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, image=self.img_yuv).pack()
-            tk.Label(container, text="Imagine YUV", font=("Arial", 14, "bold")).pack(pady=10)
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
-
-    def aplicare_conversie_RGB_in_YCbCr(self):
-        """
-        Aplica conversia RGB -> YCbCr (standardul JPEG) folosind formulele din laborator.
-        """
-        try:
-            # Verificam daca avem deja o imagine in memorie
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                # Daca nu, deschidem o imagine noua
-                result = self.procesare_imagine()
-                if result is None:
-                    return
-            
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-            
-            # Cream obiectul PhotoImage pentru rezultatul YCbCr
-            self.img_ycbcr = tk.PhotoImage(width=w, height=h)
-
-            rows_ycbcr = []
-
-            for y in range(h):
-                line_ycbcr = []
-                for x in range(w):
-                    r, g, b = cv_img_rgb[y, x].astype(float)
-
-                    # ==========================================
-                    # FORMULE YCbCr (Standard JPEG)
-                    # ==========================================
-                    y_val = 0.299 * r + 0.587 * g + 0.114 * b
-                    
-                    # Pentru Cb si Cr, offset-ul de 128 este deja inclus direct in formula standard
-                    cb_val = -0.1687 * r - 0.3313 * g + 0.498 * b + 128
-                    cr_val = 0.498 * r - 0.4187 * g - 0.0813 * b + 128
-
-                    # Corectam valorile sa fie strict intre 0 si 255
-                    y_int = int(max(0, min(255, y_val)))
-                    cb_int = int(max(0, min(255, cb_val)))
-                    cr_int = int(max(0, min(255, cr_val)))
-
-                    # Asamblam pixelul in format hexazecimal
-                    line_ycbcr.append(f"#{y_int:02x}{cb_int:02x}{cr_int:02x}")
-
-                # Punem tot randul in formatul cerut de Tkinter
-                rows_ycbcr.append(f"{{{ ' '.join(line_ycbcr) }}}")
-
-            # "Desenam" imaginea
-            self.img_ycbcr.put(" ".join(rows_ycbcr))
-
-            # ==========================================
-            # AFISARE PE ECRAN (Centrat)
-            # ==========================================
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, image=self.img_ycbcr).pack()
-            tk.Label(container, text="Imagine YCbCr (Standard JPEG)", font=("Arial", 14, "bold")).pack(pady=10)
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))    
 
     def deschide_dialog_prag(self):
         """
@@ -728,289 +811,97 @@ class Aplicatie(tk.Tk):
         return img_bin
 
     def aplicare_binarizare(self):
-        """
-        Transforma imaginea intr-una strict alb-negru (binara) pe baza unui prag.
-        """
-        try:
-            # Verificam daca avem imagine in memorie
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
-            
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-            
-            # Cream obiectele PhotoImage (Original si Binarizat)
-            self.img_original = tk.PhotoImage(width=w, height=h)
-            self.img_binar = tk.PhotoImage(width=w, height=h)
+        """Transforma imaginea intr-una strict alb-negru (binara) pe baza unui prag."""
+        self.functie_curenta = 'aplicare_binarizare'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-            rows_orig, rows_bin = [], []
-            
-            # STABILIREA PRAGULUI (Threshold)
-            # Folosim mijlocul intervalului (255 / 2 = ~127)
-            prag = 127 
+        prag = self.prag_utilizator if self.prag_utilizator is not None else 127
+        
+        img_bin = np.zeros((h, w, 3), dtype=np.uint8)
+        for y in range(h):
+            for x in range(w):
+                gray = int(np.mean(self.cv_img_rgb[y, x]))
+                val = 255 if gray >= prag else 0
+                img_bin[y, x] = [val, val, val]
 
-            for y in range(h):
-                line_orig, line_bin = [], []
-                for x in range(w):
-                    r, g, b = cv_img_rgb[y, x].astype(int)
+        self.afisare_rezultat_dublu(self.cv_img_rgb, img_bin, 
+            f"Binarizare (Prag: {prag})", "Original", "Binarizata")
+        self.adauga_butoane_inapoi_cu_prag()
 
-                    # --- Pentru imaginea originala (doar reconstruim pixelii) ---
-                    line_orig.append(f"#{r:02x}{g:02x}{b:02x}")
-
-                    # --- Pentru Binarizare ---
-                    # 1. Gasim valoarea de luminozitate (folosim media aritmetica)
-                    gray = (r + g + b) // 3
-
-                    # 2. Aplicam pragul ales de noi
-                    if gray >= prag:
-                        line_bin.append("#ffffff") # Alb pur
-                    else:
-                        line_bin.append("#000000") # Negru pur
-
-                # Impachetam randurile pentru formatul Tkinter
-                rows_orig.append(f"{{{ ' '.join(line_orig) }}}")
-                rows_bin.append(f"{{{ ' '.join(line_bin) }}}")
-
-            # Incarcam datele in imagini
-            self.img_original.put(" ".join(rows_orig))
-            self.img_binar.put(" ".join(rows_bin))
-
-            # ==========================================
-            # AFISARE PE ECRAN (Centrat)
-            # ==========================================
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text=f"Binarizare (Prag ales: {prag})", font=("Arial", 18, "bold")).pack(pady=10)
-
-            # Folosim un Frame orizontal pentru a pune pozele side-by-side
-            row_frame = tk.Frame(container)
-            row_frame.pack()
-
-            # Imaginea Originala (Stanga)
-            f_orig = tk.Frame(row_frame)
-            f_orig.pack(side="left", padx=15)
-            tk.Label(f_orig, image=self.img_original).pack()
-            tk.Label(f_orig, text="Imagine Originala", font=("Arial", 12)).pack()
-
-            # Imaginea Binarizata (Dreapta)
-            f_bin = tk.Frame(row_frame)
-            f_bin.pack(side="left", padx=15)
-            tk.Label(f_bin, image=self.img_binar).pack()
-            tk.Label(f_bin, text="Imagine Binarizata (Alb/Negru pur)", font=("Arial", 12, "bold")).pack()
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     def calculare_centru_de_masa(self):
-        """
-        Calculeaza centrul de masa (greutate) al imaginii pe baza luminantei
-        si deseneaza un indicator vizual (o cruce rosie) pe acele coordonate.
-        """
-        try:
-            # Verificam daca avem imagine in memorie
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
-            
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-            
-            # 1. CALCULUL MATEMATIC AL CENTRULUI DE MASA
-            suma_x = 0
-            suma_y = 0
-            suma_mase = 0
+        """Calcula centrul de masa si deseneaza un indicator vizual pe acele coordonate."""
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
+        
+        suma_x = suma_y = suma_mase = 0
+        for y in range(h):
+            for x in range(w):
+                masa = np.sum(self.cv_img_rgb[y, x].astype(int))
+                suma_x += x * masa
+                suma_y += y * masa
+                suma_mase += masa
 
-            # Parcurgem imaginea pentru a aduna "masele"
-            for y in range(h):
-                for x in range(w):
-                    r, g, b = cv_img_rgb[y, x].astype(int)
-                    # "Masa" pixelului este intensitatea lui (putem folosi suma RGB sau media)
-                    masa = r + g + b 
-                    
-                    suma_x += x * masa
-                    suma_y += y * masa
-                    suma_mase += masa
+        cx, cy = (int(suma_x / suma_mase), int(suma_y / suma_mase)) if suma_mase > 0 else (w // 2, h // 2)
 
-            # Evitam impartirea la zero in cazul (improbabil) al unei imagini complet negre
-            if suma_mase == 0:
-                cx, cy = w // 2, h // 2
-            else:
-                cx = int(suma_x / suma_mase)
-                cy = int(suma_y / suma_mase)
+        img_centru = self.cv_img_rgb.copy()
+        # Desenam crucea rosie direct in matrice (pe 40 de pixeli lungime)
+        for d in range(-20, 21):
+            if 0 <= cx+d < w: img_centru[cy, cx+d] = [255, 0, 0]
+            if 0 <= cy+d < h: img_centru[cy+d, cx] = [255, 0, 0]
 
-            # 2. GENERAREA IMAGINII CU INDICATORUL VIZUAL
-            self.img_centru = tk.PhotoImage(width=w, height=h)
-            rows = []
-
-            for y in range(h):
-                line = []
-                for x in range(w):
-                    # Desenam o "tinta" (cruce) rosie peste centrul de masa
-                    # Daca pixelul curent este pe linia lui cx sau cy
-                    if (abs(x - cx) <= 1 and abs(y - cy) <= 20) or (abs(y - cy) <= 1 and abs(x - cx) <= 20):
-                        line.append("#ff0000") # Rosu pur
-                    else:
-                        r, g, b = cv_img_rgb[y, x].astype(int)
-                        line.append(f"#{r:02x}{g:02x}{b:02x}")
-
-                rows.append(f"{{{ ' '.join(line) }}}")
-
-            self.img_centru.put(" ".join(rows))
-
-            # ==========================================
-            # AFISARE PE ECRAN
-            # ==========================================
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Centrul de Masa al Imaginii", font=("Arial", 18, "bold")).pack(pady=10)
-            
-            # Afisam coordonatele calculate
-            tk.Label(container, text=f"Coordonate calculate: X = {cx}, Y = {cy}", font=("Arial", 14), fg="blue").pack(pady=5)
-
-            tk.Label(container, image=self.img_centru).pack(pady=10)
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
+        self.afisare_rezultat_dublu(self.cv_img_rgb, img_centru, f"Centru de Masa: X={cx}, Y={cy}", "Original", "Centru de Masa")
 
     # ==========================================
     # LABORATOR 5 – Functii noi
     # ==========================================
 
     def aplicare_conversie_RGB_in_HSV(self):
-        """
-        Converteste imaginea din spatiul de culoare RGB in spatiul HSV.
+        """Converteste imaginea in spatiul HSV si afiseaza canalele."""
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-        Formulele utilizate (conform laboratorului):
-        - Se normalizeaza R, G, B in intervalul [0, 1]: r = R/255, g = G/255, b = B/255
-        - M = max(r, g, b), m = min(r, g, b), C = M - m
-        - V (Value) = M
-        - S (Saturation) = C / V daca V != 0, altfel S = 0
-        - H (Hue):
-            * Daca C != 0:
-                - Daca M == r: H = 60 * (g - b) / C
-                - Daca M == g: H = 120 + 60 * (b - r) / C
-                - Daca M == b: H = 240 + 60 * (r - g) / C
-            * Altfel (grayscale): H = 0
-            * Daca H < 0: H = H + 360
+        # 1. Calculam matricile pentru fiecare canal
+        img_hsv_comb = np.zeros((h, w, 3), dtype=np.uint8)
+        img_h = np.zeros((h, w, 3), dtype=np.uint8)
+        img_s = np.zeros((h, w, 3), dtype=np.uint8)
+        img_v = np.zeros((h, w, 3), dtype=np.uint8)
 
-        Normalizare pentru afisare pe 8 biti (0-255):
-        - H_norm = H * 255 / 360
-        - S_norm = S * 255
-        - V_norm = V * 255
+        for y in range(h):
+            for x in range(w):
+                r, g, b = self.cv_img_rgb[y, x] / 255.0
+                M, m = max(r, g, b), min(r, g, b)
+                C = M - m
+                V = M
+                S = C / V if V != 0 else 0
+                if C == 0: H = 0
+                elif M == r: H = 60 * ((g - b) / C % 6)
+                elif M == g: H = 60 * ((b - r) / C + 2)
+                else: H = 60 * ((r - g) / C + 4)
+                
+                hn, sn, vn = int(H * 255 / 360), int(S * 255), int(V * 255)
+                img_hsv_comb[y, x] = [hn, sn, vn]
+                img_h[y, x] = [hn, hn, hn]
+                img_s[y, x] = [sn, sn, sn]
+                img_v[y, x] = [vn, vn, vn]
 
-        Afiseaza 4 imagini: HSV combinat, H, S, V separate.
-        """
-        try:
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        # 2. Afisare
+        self.curata_ecranul()
+        container = tk.Frame(self); container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text="Conversie RGB -> HSV", font=("Arial", 18, "bold")).pack(pady=10)
+        row = tk.Frame(container); row.pack()
+        
+        for img, t in zip([img_hsv_comb, img_h, img_s, img_v], ["HSV Combinat", "H (Hue)", "S (Saturation)", "V (Value)"]):
+            f = tk.Frame(row); f.pack(side="left", padx=5)
+            p, _, _ = self.matrice_la_imagine(img)
+            lbl = tk.Label(f, image=p); lbl.image = p; lbl.pack()
+            tk.Label(f, text=t, font=("Arial", 10, "bold")).pack()
+        self.adauga_buton_inapoi()
 
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-
-            # Cream 4 obiecte PhotoImage: HSV combinat + H, S, V separate
-            self.img_hsv = tk.PhotoImage(width=w, height=h)
-            self.img_h_ch = tk.PhotoImage(width=w, height=h)
-            self.img_s_ch = tk.PhotoImage(width=w, height=h)
-            self.img_v_ch = tk.PhotoImage(width=w, height=h)
-
-            rows_hsv, rows_h, rows_s, rows_v = [], [], [], []
-
-            for y_px in range(h):
-                line_hsv, line_h, line_s, line_v = [], [], [], []
-                for x_px in range(w):
-                    R, G, B = cv_img_rgb[y_px, x_px].astype(float)
-
-                    # Normalizam componentele RGB in intervalul [0, 1]
-                    r = R / 255.0
-                    g = G / 255.0
-                    b = B / 255.0
-
-                    M = max(r, g, b)
-                    m = min(r, g, b)
-                    C = M - m
-
-                    # Value
-                    V = M
-
-                    # Saturation
-                    if V != 0:
-                        S = C / V
-                    else:  # negru
-                        S = 0
-
-                    # Hue
-                    if C != 0:
-                        if M == r:
-                            H = 60.0 * (g - b) / C
-                        elif M == g:
-                            H = 120.0 + 60.0 * (b - r) / C
-                        else:  # M == b
-                            H = 240.0 + 60.0 * (r - g) / C
-                    else:  # grayscale
-                        H = 0
-
-                    if H < 0:
-                        H = H + 360
-
-                    # Normalizam in intervalul [0, 255] pentru afisare ca imagine 8 biti
-                    H_norm = int(max(0, min(255, H * 255.0 / 360.0)))
-                    S_norm = int(max(0, min(255, S * 255.0)))
-                    V_norm = int(max(0, min(255, V * 255.0)))
-
-                    # HSV combinat (H pe canalul rosu, S pe verde, V pe albastru)
-                    line_hsv.append(f"#{H_norm:02x}{S_norm:02x}{V_norm:02x}")
-                    # Canale separate in tonuri de gri
-                    line_h.append(f"#{H_norm:02x}{H_norm:02x}{H_norm:02x}")
-                    line_s.append(f"#{S_norm:02x}{S_norm:02x}{S_norm:02x}")
-                    line_v.append(f"#{V_norm:02x}{V_norm:02x}{V_norm:02x}")
-
-                rows_hsv.append(f"{{{ ' '.join(line_hsv) }}}")
-                rows_h.append(f"{{{ ' '.join(line_h) }}}")
-                rows_s.append(f"{{{ ' '.join(line_s) }}}")
-                rows_v.append(f"{{{ ' '.join(line_v) }}}")
-
-            # "Desenam" imaginile
-            self.img_hsv.put(" ".join(rows_hsv))
-            self.img_h_ch.put(" ".join(rows_h))
-            self.img_s_ch.put(" ".join(rows_s))
-            self.img_v_ch.put(" ".join(rows_v))
-
-            # AFISARE PE ECRAN
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Conversie RGB -> HSV", font=("Arial", 18, "bold")).pack(pady=10)
-
-            row_frame = tk.Frame(container)
-            row_frame.pack()
-
-            for img, titlu in zip(
-                [self.img_hsv, self.img_h_ch, self.img_s_ch, self.img_v_ch],
-                ["HSV Combinat", "H (Hue)", "S (Saturation)", "V (Value)"]
-            ):
-                f = tk.Frame(row_frame)
-                f.pack(side="left", padx=5)
-                tk.Label(f, image=img).pack()
-                tk.Label(f, text=titlu, font=("Arial", 10, "bold")).pack()
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     def calculeaza_histograma(self, img_rgb):
         """
@@ -1171,536 +1062,178 @@ class Aplicatie(tk.Tk):
         return img_out
 
     def aplicare_egalizare_histograma(self):
-        """
-        Aplica egalizarea histogramei pe imaginea din memorie.
-        Afiseaza imaginea originala (convertita la grayscale) si versiunea egalizata side-by-side.
-        """
-        try:
-            # Verificam daca avem deja o imagine in memorie
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                # Daca nu, deschidem o imagine noua
-                result = self.procesare_imagine()
-                if result is None:
-                    return
-            
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
-            
-            # 1. Convertim imaginea la grayscale pentru afisare
+        """Aplica egalizarea histogramei pe imaginea din memorie."""
+        def logica(img):
+            # Imaginea originala convertita la grayscale (3 canale identice)
+            h, w = img.shape[:2]
             img_gray = np.zeros((h, w, 3), dtype=np.uint8)
             for y in range(h):
                 for x in range(w):
-                    r, g, b = cv_img_rgb[y, x].astype(float)
-                    gray = int((r + g + b) / 3)
-                    img_gray[y, x] = [gray, gray, gray]
-            
-            # 2. Aplicam egalizarea
-            img_egalizata = self.egalizare_histograma(cv_img_rgb)
-            
-            # 3. Cream 2 obiecte PhotoImage pentru original si egalizat
-            self.img_original = tk.PhotoImage(width=w, height=h)
-            self.img_egalizat = tk.PhotoImage(width=w, height=h)
-            
-            # Construim datele pentru imaginea originala (grayscale)
-            rows_original = []
-            for y in range(h):
-                line = " ".join(f"#{img_gray[y, x][0]:02x}{img_gray[y, x][1]:02x}{img_gray[y, x][2]:02x}" 
-                                for x in range(w))
-                rows_original.append(f"{{{line}}}")
-            self.img_original.put(" ".join(rows_original))
-            
-            # Construim datele pentru imaginea egalizata
-            rows_egalizat = []
-            for y in range(h):
-                line = " ".join(f"#{img_egalizata[y, x][0]:02x}{img_egalizata[y, x][1]:02x}{img_egalizata[y, x][2]:02x}" 
-                                for x in range(w))
-                rows_egalizat.append(f"{{{line}}}")
-            self.img_egalizat.put(" ".join(rows_egalizat))
-            
-            # ==========================================
-            # AFISARE REZULTATE (Centrat)
-            # ==========================================
-            self.curata_ecranul()
-            
-            # Containerul principal centrat pe pagina
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-            
-            # Adaugam un titlu pentru aceasta pagina
-            tk.Label(container, text="Egalizare Histograma (Accentuare Contrast)", font=("Arial", 18, "bold")).pack(pady=10)
-            
-            # Cream un sub-container orizontal pentru a pune pozele una langa alta
-            row_frame = tk.Frame(container)
-            row_frame.pack()
-            
-            # Afisam imaginea originala si cea egalizata
-            for img, titlu in zip([self.img_original, self.img_egalizat], 
-                                  ["Original (Grayscale)", "Egalizata (Contrast Crescut)"]):
-                f = tk.Frame(row_frame)
-                f.pack(side="left", padx=15)
-                tk.Label(f, image=img).pack()
-                tk.Label(f, text=titlu, font=("Arial", 12, "bold")).pack(pady=5)
-            
-            # Butonul inapoi
-            self.adauga_buton_inapoi()
-            
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
+                    g = int(np.mean(img[y, x]))
+                    img_gray[y, x] = [g, g, g]
+            return self.egalizare_histograma(img)
+
+        self.incarcare_si_procesare_imagine(logica, "Egalizare Histograma (Contrast)", "Original (Grayscale)", "Egalizata")
 
     def calculare_moment_ordin_1(self):
-        """
-        Calculeaza momentele de ordin 1 ale unei imagini binarizate.
-        NU se foloseste OpenCV.
+        """Calculeaza momentele de ordin 1 si centroidul."""
+        self.functie_curenta = 'calculare_moment_ordin_1'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-        Momentele brute calculate:
-        - M00 = Σ I(x,y) — suma tuturor valorilor pixelilor (aria obiectului in imagine binara)
-        - M10 = Σ x * I(x,y) — momentul de ordin 1 pe axa X
-        - M01 = Σ y * I(x,y) — momentul de ordin 1 pe axa Y
+        prag = self.prag_utilizator if self.prag_utilizator is not None else 220
+        img_bin = self.logica_binarizare(prag=prag)
 
-        Din aceste momente se calculeaza centroidul (centrul de masa):
-        - x_centroid = M10 / M00
-        - y_centroid = M01 / M00
+        M00 = np.sum(img_bin)
+        indices = np.where(img_bin == 1)
+        M10 = np.sum(indices[1])
+        M01 = np.sum(indices[0])
 
-        Imaginea este binarizata (alb/negru) cu un prag de 127 pentru a lucra cu
-        forme simple (cercuri, dreptunghiuri rotite create in Paint).
-        Se deseneaza o cruce rosie pe centroid ca indicator vizual.
-        """
-        try:
-            # Setez functia curenta pentru relansare dupa schimbarea pragului
-            self.functie_curenta = 'calculare_moment_ordin_1'
-            
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        cx, cy = (M10 / M00, M01 / M00) if M00 > 0 else (w/2, h/2)
 
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        # Generam imaginea binarizata cu indicator (R=G=B pentru binara)
+        img_res = np.ones((h, w, 3), dtype=np.uint8) * 255
+        img_res[img_bin == 1] = [0, 0, 0]
+        
+        # Desenam crucea rosie
+        for d in range(-20, 21):
+            if 0 <= int(cx)+d < w: img_res[int(cy), int(cx)+d] = [255, 0, 0]
+            if 0 <= int(cy)+d < h: img_res[int(cy)+d, int(cx)] = [255, 0, 0]
 
-            # 1. Binarizam imaginea folosind functia auxiliara (aceeasi logica ca aplicare_binarizare)
-            # Calculaza pragul adaptiv (implicit este 220 pentru a detecta si obiecte colorate, dar poate fi schimbat)
-            prag = self.prag_utilizator if self.prag_utilizator is not None else 220
-            img_bin = self.logica_binarizare(prag=prag)
+        self.curata_ecranul()
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text=f"Momente Ordin 1 - Centroid: ({cx:.2f}, {cy:.2f})", font=("Arial", 18, "bold")).pack(pady=10)
+        
+        photo, _, _ = self.matrice_la_imagine(img_res)
+        lbl = tk.Label(container, image=photo)
+        lbl.image = photo
+        lbl.pack(pady=10)
+        
+        self.adauga_butoane_inapoi_cu_prag()
 
-            # 2. Calculam momentele de ordin 0 si 1 folosind matricea binarizata
-            M00 = 0  # Moment de ordin 0 (aria obiectului)
-            M10 = 0  # Moment de ordin 1 pe X
-            M01 = 0  # Moment de ordin 1 pe Y
-
-            for y_px in range(h):
-                for x_px in range(w):
-                    I = img_bin[y_px, x_px]
-                    M00 += I
-                    M10 += x_px * I
-                    M01 += y_px * I
-
-            # 3. Calculam centroidul (centrul de masa)
-            if M00 > 0:
-                cx = M10 / M00
-                cy = M01 / M00
-            else:
-                cx, cy = w / 2, h / 2
-
-            # 4. Generam imaginea binarizata cu indicator vizual (cruce rosie pe centroid)
-            self.img_moment1 = tk.PhotoImage(width=w, height=h)
-            rows = []
-
-            for y_px in range(h):
-                line = []
-                for x_px in range(w):
-                    # Desenam crucea rosie pe centroid
-                    if (abs(x_px - int(cx)) <= 1 and abs(y_px - int(cy)) <= 20) or \
-                       (abs(y_px - int(cy)) <= 1 and abs(x_px - int(cx)) <= 20):
-                        line.append("#ff0000")
-                    else:
-                        # Folosim matricea binarizata pentru afisare
-                        if img_bin[y_px, x_px] == 1:
-                            line.append("#000000")  # Obiect = negru
-                        else:
-                            line.append("#ffffff")  # Fond = alb
-                rows.append(f"{{{ ' '.join(line) }}}")
-
-            self.img_moment1.put(" ".join(rows))
-
-            # 5. AFISARE PE ECRAN
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Momente de Ordin 1", font=("Arial", 18, "bold")).pack(pady=10)
-
-            # Afisam valorile calculate
-            info_frame = tk.Frame(container)
-            info_frame.pack(pady=5)
-            tk.Label(info_frame, text=f"M00 (Aria obiectului) = {M00}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"M10 (Moment ordin 1, axa X) = {M10}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"M01 (Moment ordin 1, axa Y) = {M01}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"Centroid: X = {cx:.2f}, Y = {cy:.2f}",
-                     font=("Arial", 14, "bold"), fg="darkgreen").pack(pady=5)
-
-            tk.Label(container, image=self.img_moment1).pack(pady=10)
-
-            # Legenda
-            tk.Label(container, text="● Rosu = Centroid (centrul de masa)", fg="red", font=("Arial", 10)).pack()
-
-            self.adauga_butoane_inapoi_cu_prag()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     def calculare_moment_ordin_2(self):
-        """
-        Calculeaza momentele de ordin 2 ale unei imagini binarizate.
-        NU se foloseste OpenCV.
+        """Calculeaza momentele de ordin 2 si orientarea."""
+        self.functie_curenta = 'calculare_moment_ordin_2'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-        Momentele brute de ordin 2:
-        - M20 = Σ x² * I(x,y) — momentul de ordin 2 pe axa X
-        - M02 = Σ y² * I(x,y) — momentul de ordin 2 pe axa Y
-        - M11 = Σ x * y * I(x,y) — momentul mixt de ordin 2
+        prag = self.prag_utilizator if self.prag_utilizator is not None else 220
+        img_bin = self.logica_binarizare(prag=prag)
 
-        Momentele centrale de ordin 2 (relative la centroid):
-        - μ20 = M20 - cx * M10
-        - μ02 = M02 - cy * M01
-        - μ11 = M11 - cx * M01
+        M00 = np.sum(img_bin)
+        if M00 == 0: return self.afiseaza_eroare("Nu s-au gasit obiecte pentru calcul.")
+        
+        indices = np.where(img_bin == 1)
+        cx, cy = np.mean(indices[1]), np.mean(indices[0])
 
-        Din momentele de ordin 2 se calculeaza orientarea obiectului:
-        - θ = 0.5 * arctan(2 * μ11 / (μ20 - μ02))
+        mu20 = np.sum((indices[1] - cx)**2)
+        mu02 = np.sum((indices[0] - cy)**2)
+        mu11 = np.sum((indices[1] - cx) * (indices[0] - cy))
 
-        Aceasta reprezinta unghiul axei principale a obiectului.
-        Se deseneaza o linie verde pentru axa principala si o cruce rosie pe centroid.
-        """
-        try:
-            # Setez functia curenta pentru relansare dupa schimbarea pragului
-            self.functie_curenta = 'calculare_moment_ordin_2'
-            
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        theta = 0.5 * math.atan2(2 * mu11, mu20 - mu02)
+        theta_deg = math.degrees(theta)
 
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        img_res = np.ones((h, w, 3), dtype=np.uint8) * 255
+        img_res[img_bin == 1] = [0, 0, 0]
+        
+        # Desenam axa principala (verde)
+        length = min(w, h) // 3
+        for r in range(-length, length):
+            px = int(cx + r * math.cos(theta))
+            py = int(cy + r * math.sin(theta))
+            if 0 <= px < w and 0 <= py < h: img_res[py, px] = [0, 255, 0]
 
-            # Binarizam imaginea folosind functia auxiliara (aceeasi logica ca aplicare_binarizare)
-            # Calculaza pragul adaptiv (implicit este 220 pentru a detecta si obiecte colorate, dar poate fi schimbat)
-            prag = self.prag_utilizator if self.prag_utilizator is not None else 220
-            img_bin = self.logica_binarizare(prag=prag)
+        self.curata_ecranul()
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text=f"Orientare: {theta_deg:.2f}°", font=("Arial", 18, "bold")).pack(pady=10)
+        
+        photo, _, _ = self.matrice_la_imagine(img_res)
+        lbl = tk.Label(container, image=photo); lbl.image = photo; lbl.pack()
+        self.adauga_butoane_inapoi_cu_prag()
 
-            # Calculam TOATE momentele necesare (ordin 0, 1 si 2) folosind matricea binarizata
-            M00, M10, M01 = 0, 0, 0
-            M20, M02, M11 = 0, 0, 0
-
-            for y_px in range(h):
-                for x_px in range(w):
-                    I = img_bin[y_px, x_px]
-
-                    M00 += I
-                    M10 += x_px * I
-                    M01 += y_px * I
-                    M20 += x_px * x_px * I
-                    M02 += y_px * y_px * I
-                    M11 += x_px * y_px * I
-
-            # Centroid
-            if M00 != 0:
-                cx = M10 / M00
-                cy = M01 / M00
-            else:
-                cx, cy = w / 2, h / 2
-
-            # Momente centrale de ordin 2
-            mu20 = M20 - cx * M10
-            mu02 = M02 - cy * M01
-            mu11 = M11 - cx * M01
-
-            # Orientarea axei principale (in grade)
-            if (mu20 - mu02) != 0:
-                theta = 0.5 * math.atan2(2 * mu11, mu20 - mu02)
-            else:
-                theta = 0
-            theta_deg = math.degrees(theta)
-
-            # Generam imaginea cu indicatoare vizuale
-            self.img_moment2 = tk.PhotoImage(width=w, height=h)
-            rows = []
-
-            # Lungimea liniei axei principale pentru vizualizare
-            line_length = min(w, h) // 3
-
-            for y_px in range(h):
-                line = []
-                for x_px in range(w):
-                    dx = x_px - int(cx)
-                    dy = y_px - int(cy)
-
-                    # Verificam daca punctul este pe axa principala (linie verde)
-                    dist_to_axis = abs(dx * math.sin(theta) - dy * math.cos(theta))
-                    dist_from_center = math.sqrt(dx * dx + dy * dy)
-
-                    if dist_to_axis <= 1.5 and dist_from_center <= line_length:
-                        line.append("#00ff00")  # Verde pentru axa principala
-                    elif (abs(x_px - int(cx)) <= 1 and abs(y_px - int(cy)) <= 15) or \
-                         (abs(y_px - int(cy)) <= 1 and abs(x_px - int(cx)) <= 15):
-                        line.append("#ff0000")  # Rosu pentru centroid
-                    else:
-                        # Folosim matricea binarizata pentru afisare
-                        if img_bin[y_px, x_px] == 1:
-                            line.append("#000000")
-                        else:
-                            line.append("#ffffff")
-                rows.append(f"{{{ ' '.join(line) }}}")
-
-            self.img_moment2.put(" ".join(rows))
-
-            # AFISARE PE ECRAN
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Momente de Ordin 2", font=("Arial", 18, "bold")).pack(pady=10)
-
-            info_frame = tk.Frame(container)
-            info_frame.pack(pady=5)
-            tk.Label(info_frame, text=f"M20 = {M20}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"M02 = {M02}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"M11 = {M11}", font=("Arial", 12), fg="blue").pack()
-            tk.Label(info_frame, text=f"μ20 = {mu20:.2f}", font=("Arial", 12), fg="purple").pack()
-            tk.Label(info_frame, text=f"μ02 = {mu02:.2f}", font=("Arial", 12), fg="purple").pack()
-            tk.Label(info_frame, text=f"μ11 = {mu11:.2f}", font=("Arial", 12), fg="purple").pack()
-            tk.Label(info_frame, text=f"Orientare (θ) = {theta_deg:.2f}°",
-                     font=("Arial", 14, "bold"), fg="darkgreen").pack(pady=5)
-
-            tk.Label(container, image=self.img_moment2).pack(pady=10)
-
-            # Legenda
-            legend = tk.Frame(container)
-            legend.pack()
-            tk.Label(legend, text="● Rosu = Centroid", fg="red", font=("Arial", 10)).pack(side="left", padx=10)
-            tk.Label(legend, text="● Verde = Axa Principala", fg="green", font=("Arial", 10)).pack(side="left", padx=10)
-
-            self.adauga_butoane_inapoi_cu_prag()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     def calculare_matrice_covarianta(self):
-        """
-        Calculeaza matricea de covarianta a unei imagini binarizate.
+        """Calculeaza matricea de covarianta a unei imagini binarizate."""
+        self.functie_curenta = 'calculare_matrice_covarianta'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-        Matricea de covarianta 2x2 descrie distributia spatiala a pixelilor:
+        prag = self.prag_utilizator if self.prag_utilizator is not None else 220
+        img_bin = self.logica_binarizare(prag=prag)
 
-        Cov = | cov_xx  cov_xy |   =   | μ20/M00  μ11/M00 |
-              | cov_xy  cov_yy |       | μ11/M00  μ02/M00 |
+        M00 = np.sum(img_bin)
+        if M00 == 0: return self.afiseaza_eroare("Nu s-au gasit obiecte.")
+        
+        indices = np.where(img_bin == 1)
+        cx, cy = np.mean(indices[1]), np.mean(indices[0])
 
-        unde:
-        - μ20 = Σ (x - cx)² * I(x,y)  — variatia pe axa X
-        - μ02 = Σ (y - cy)² * I(x,y)  — variatia pe axa Y
-        - μ11 = Σ (x - cx)(y - cy) * I(x,y) — corelatia X-Y
-        - cx, cy = centroidul imaginii
-        """
-        try:
-            # Setez functia curenta pentru relansare dupa schimbarea pragului
-            self.functie_curenta = 'calculare_matrice_covarianta'
-            
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        mu20 = np.sum((indices[1] - cx)**2)
+        mu02 = np.sum((indices[0] - cy)**2)
+        mu11 = np.sum((indices[1] - cx) * (indices[0] - cy))
 
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        cov_xx, cov_yy, cov_xy = mu20/M00, mu02/M00, mu11/M00
+        trace = cov_xx + cov_yy
+        det = cov_xx * cov_yy - cov_xy**2
+        lambda1 = trace/2 + math.sqrt(max(0, trace**2/4 - det))
+        lambda2 = trace/2 - math.sqrt(max(0, trace**2/4 - det))
 
-            # Binarizam imaginea folosind functia auxiliara (aceeasi logica ca aplicare_binarizare)
-            # Calculaza pragul adaptiv (implicit este 220 pentru a detecta si obiecte colorate, dar poate fi schimbat)
-            prag = self.prag_utilizator if self.prag_utilizator is not None else 220
-            img_bin = self.logica_binarizare(prag=prag)
+        self.curata_ecranul()
+        container = tk.Frame(self); container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text="Matricea de Covarianta", font=("Arial", 18, "bold")).pack(pady=10)
+        tk.Label(container, text=f"λ1 = {lambda1:.2f}, λ2 = {lambda2:.2f}", font=("Arial", 14), fg="darkgreen").pack()
+        
+        m_frame = tk.Frame(container, bd=2, relief="ridge", padx=20, pady=10); m_frame.pack(pady=10)
+        tk.Label(m_frame, text=f"| {cov_xx:12.2f}  {cov_xy:12.2f} |", font=("Courier", 14)).pack()
+        tk.Label(m_frame, text=f"| {cov_xy:12.2f}  {cov_yy:12.2f} |", font=("Courier", 14)).pack()
 
-            # Prima trecere: calculam M00, M10, M01 pentru centroid
-            M00, M10, M01 = 0, 0, 0
+        self.adauga_butoane_inapoi_cu_prag()
 
-            for y_px in range(h):
-                for x_px in range(w):
-                    I = img_bin[y_px, x_px]
-
-                    M00 += I
-                    M10 += x_px * I
-                    M01 += y_px * I
-
-            if M00 == 0:
-                cx, cy = w / 2, h / 2
-                M00 = 1  # Evitam impartirea la zero
-            else:
-                cx = M10 / M00
-                cy = M01 / M00
-
-            # A doua trecere: calculam momentele centrale folosind matricea binarizata
-            mu20, mu02, mu11 = 0.0, 0.0, 0.0
-
-            for y_px in range(h):
-                for x_px in range(w):
-                    I = img_bin[y_px, x_px]
-
-                    dx = x_px - cx
-                    dy = y_px - cy
-
-                    mu20 += dx * dx * I
-                    mu02 += dy * dy * I
-                    mu11 += dx * dy * I
-
-            # Matricea de covarianta
-            cov_xx = mu20 / M00
-            cov_yy = mu02 / M00
-            cov_xy = mu11 / M00
-
-            # Calculam valorile proprii (eigenvalues) ale matricei 2x2
-            trace = cov_xx + cov_yy
-            det = cov_xx * cov_yy - cov_xy * cov_xy
-            discriminant = max(0, trace * trace / 4 - det)  # Asiguram >= 0 (erori numerice)
-
-            lambda1 = trace / 2 + math.sqrt(discriminant)
-            lambda2 = trace / 2 - math.sqrt(discriminant)
-
-            # AFISARE PE ECRAN
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Matricea de Covarianta", font=("Arial", 18, "bold")).pack(pady=10)
-
-            # Afisam centroidul
-            tk.Label(container, text=f"Centroid: ({cx:.2f}, {cy:.2f})",
-                     font=("Arial", 12), fg="blue").pack(pady=5)
-
-            # Afisam matricea intr-un format vizual
-            matrix_frame = tk.Frame(container, bd=2, relief="ridge", padx=20, pady=10)
-            matrix_frame.pack(pady=10)
-
-            tk.Label(matrix_frame, text="Matrice de Covarianta:", font=("Arial", 14, "bold")).pack()
-            tk.Label(matrix_frame, text=f"| {cov_xx:12.2f}  {cov_xy:12.2f} |",
-                     font=("Courier", 14)).pack()
-            tk.Label(matrix_frame, text=f"| {cov_xy:12.2f}  {cov_yy:12.2f} |",
-                     font=("Courier", 14)).pack()
-
-            # Afisam valorile proprii
-            tk.Label(container, text=f"Valoare proprie λ1 = {lambda1:.2f}",
-                     font=("Arial", 12), fg="darkgreen").pack(pady=2)
-            tk.Label(container, text=f"Valoare proprie λ2 = {lambda2:.2f}",
-                     font=("Arial", 12), fg="darkgreen").pack(pady=2)
-
-            # Afisam formula
-            tk.Label(container, text="Formula: Cov = [[μ20/M00, μ11/M00], [μ11/M00, μ02/M00]]",
-                     font=("Arial", 10), fg="gray").pack(pady=5)
-
-            self.adauga_butoane_inapoi_cu_prag()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     def calculare_proiectii(self):
-        """
-        Calculeaza si afiseaza proiectiile orizontala si verticala ale imaginii.
+        """Calculeaza si afiseaza proiectiile orizontala si verticala."""
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
 
-        Proiectia orizontala:
-        - Pentru fiecare rand y, se calculeaza suma intensitatilor tuturor pixelilor:
-          proj_h[y] = Σ_x I(x, y)
-        - Se afiseaza ca un grafic de bare orizontale (in dreapta imaginii)
+        img_gray = np.mean(self.cv_img_rgb, axis=2)
+        proj_h = np.sum(img_gray, axis=1)
+        proj_v = np.sum(img_gray, axis=0)
 
-        Proiectia verticala:
-        - Pentru fiecare coloana x, se calculeaza suma intensitatilor tuturor pixelilor:
-          proj_v[x] = Σ_y I(x, y)
-        - Se afiseaza ca un grafic de bare verticale (sub imagine)
+        self.curata_ecranul()
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text="Proiectii Orizontala si Verticala", font=("Arial", 18, "bold")).pack(pady=10)
 
-        Proiectiile sunt utile pentru:
-        - Detectarea limitelor obiectelor
-        - Segmentarea textului
-        - Analiza formei si pozitiei obiectelor in imagine
-        """
-        try:
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        main_frame = tk.Frame(container); main_frame.pack()
+        
+        # Imaginea in grayscale
+        img_gray_3ch = np.stack([img_gray]*3, axis=-1).astype(np.uint8)
+        photo, _, _ = self.matrice_la_imagine(img_gray_3ch)
+        tk.Label(main_frame, image=photo).grid(row=0, column=0, padx=5, pady=5)
+        self.img_proj = photo # Referinta
 
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        # Canvas-uri pentru proiectii
+        ph_w, pv_h = 200, 150
+        c_h = tk.Canvas(main_frame, width=ph_w, height=h, bg="white", bd=1, relief="sunken")
+        c_h.grid(row=0, column=1, padx=5, pady=5)
+        max_h = np.max(proj_h) if np.max(proj_h) > 0 else 1
+        for y, val in enumerate(proj_h):
+            c_h.create_line(0, y, (val/max_h)*ph_w, y, fill="#4444ff")
 
-            # 1. Calculam proiectiile
-            proj_h = [0] * h  # Proiectie orizontala (suma intensitatilor pe fiecare rand)
-            proj_v = [0] * w  # Proiectie verticala (suma intensitatilor pe fiecare coloana)
+        c_v = tk.Canvas(main_frame, width=w, height=pv_h, bg="white", bd=1, relief="sunken")
+        c_v.grid(row=1, column=0, padx=5, pady=5)
+        max_v = np.max(proj_v) if np.max(proj_v) > 0 else 1
+        for x, val in enumerate(proj_v):
+            c_v.create_line(x, pv_h, x, pv_h - (val/max_v)*pv_h, fill="#44aa44")
 
-            for y_px in range(h):
-                for x_px in range(w):
-                    r, g, b = cv_img_rgb[y_px, x_px].astype(int)
-                    # Folosim tonul de gri ca intensitate
-                    gray = (r + g + b) // 3
+        self.adauga_buton_inapoi()
 
-                    proj_h[y_px] += gray  # Adunam la suma randului
-                    proj_v[x_px] += gray  # Adunam la suma coloanei
-
-            # 2. AFISARE PE ECRAN
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-
-            tk.Label(container, text="Proiectii Orizontala si Verticala",
-                     font=("Arial", 18, "bold")).pack(pady=10)
-
-            # Container principal cu grid layout
-            main_frame = tk.Frame(container)
-            main_frame.pack()
-
-            # Imaginea originala (in grayscale) - stanga sus
-            self.img_proj = tk.PhotoImage(width=w, height=h)
-            rows = []
-            for y_px in range(h):
-                line = []
-                for x_px in range(w):
-                    r, g, b = cv_img_rgb[y_px, x_px].astype(int)
-                    gray = (r + g + b) // 3
-                    line.append(f"#{gray:02x}{gray:02x}{gray:02x}")
-                rows.append(f"{{{ ' '.join(line) }}}")
-            self.img_proj.put(" ".join(rows))
-
-            tk.Label(main_frame, image=self.img_proj).grid(row=0, column=0, padx=5, pady=5)
-
-            # Proiectia orizontala (grafic de bare in dreapta imaginii)
-            max_h_val = max(proj_h) if max(proj_h) > 0 else 1
-            proj_h_width = 200
-
-            canvas_h_proj = tk.Canvas(main_frame, width=proj_h_width, height=h,
-                                      bg="white", bd=1, relief="sunken")
-            canvas_h_proj.grid(row=0, column=1, padx=5, pady=5)
-
-            # Desenam barele orizontale (cate una per rand al imaginii)
-            for y_px in range(h):
-                bar_w = (proj_h[y_px] / max_h_val) * (proj_h_width - 5)
-                canvas_h_proj.create_line(0, y_px, bar_w, y_px, fill="#4444ff")
-
-            # Proiectia verticala (grafic de bare sub imagine)
-            max_v_val = max(proj_v) if max(proj_v) > 0 else 1
-            proj_v_height = 150
-
-            canvas_v_proj = tk.Canvas(main_frame, width=w, height=proj_v_height,
-                                      bg="white", bd=1, relief="sunken")
-            canvas_v_proj.grid(row=1, column=0, padx=5, pady=5)
-
-            # Desenam barele verticale (cate una per coloana a imaginii)
-            for x_px in range(w):
-                bar_h = (proj_v[x_px] / max_v_val) * (proj_v_height - 5)
-                canvas_v_proj.create_line(x_px, proj_v_height, x_px, proj_v_height - bar_h, fill="#44aa44")
-
-            # Legenda
-            legend_frame = tk.Frame(container)
-            legend_frame.pack(pady=5)
-            tk.Label(legend_frame, text="Albastru = Proiectie Orizontala (suma pe randuri)",
-                     fg="#4444ff", font=("Arial", 10)).pack()
-            tk.Label(legend_frame, text="Verde = Proiectie Verticala (suma pe coloane)",
-                     fg="#44aa44", font=("Arial", 10)).pack()
-
-            self.adauga_buton_inapoi()
-
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
 
     # ==========================================
     # LABORATOR 6 – Etichetarea Componentelor
@@ -2146,164 +1679,78 @@ class Aplicatie(tk.Tk):
         return img_out
 
     def aplicare_dilatare(self):
-        """
-        Aplica operația de dilatare pe imaginea binarizată din memorie.
-        Afișează imaginea originală și versiunile dilatate (1x, 2x, 3x iterații) side-by-side.
-        """
-        try:
-            # Setez functia curenta pentru relansare dupa schimbarea pragului
-            self.functie_curenta = 'aplicare_dilatare'
+        """Aplica operația de dilatare pe imaginea binarizată."""
+        self.functie_curenta = 'aplicare_dilatare'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
+        
+        prag = self.prag_utilizator if self.prag_utilizator is not None else int(self.cv_img_rgb.mean())
+        img_bin = self.logica_binarizare(prag=prag)
+        
+        # Aplică dilatare cu 1, 2 și 3 iterații
+        imgs = [img_bin]
+        for i in range(1, 4):
+            imgs.append(self.dilatare(img_bin, kernel_size=3, iteratii=i))
             
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        titluri = ["Original", "Dilatare 1x", "Dilatare 2x", "Dilatare 3x"]
+        photos = []
+        for img in imgs:
+            # Convertim matricea 0/1 în RGB pentru afișare
+            img_rgb = np.ones((h, w, 3), dtype=np.uint8) * 255
+            img_rgb[img == 1] = [0, 0, 0]
+            p, _, _ = self.matrice_la_imagine(img_rgb)
+            photos.append(p)
             
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        self.curata_ecranul()
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text="Dilatare (Expandare Obiecte)", font=("Arial", 18, "bold")).pack(pady=10)
+        
+        row_frame = tk.Frame(container); row_frame.pack()
+        for p, t in zip(photos, titluri):
+            f = tk.Frame(row_frame); f.pack(side="left", padx=10)
+            lbl = tk.Label(f, image=p); lbl.image = p; lbl.pack()
+            tk.Label(f, text=t, font=("Arial", 10, "bold")).pack(pady=5)
             
-            # Calculeaza pragul adaptiv (implicit este media imaginii, dar poate fi schimbat)
-            prag = self.prag_utilizator if self.prag_utilizator is not None else int(cv_img_rgb.mean())
-            
-            # Binarizează imaginea
-            img_bin = self.logica_binarizare(prag=prag)
-            
-            # Aplică dilatare cu 1, 2 și 3 iterații
-            img_dilat_1 = self.dilatare(img_bin, kernel_size=3, iteratii=1)
-            img_dilat_2 = self.dilatare(img_bin, kernel_size=3, iteratii=2)
-            img_dilat_3 = self.dilatare(img_bin, kernel_size=3, iteratii=3)
-            
-            # Cream 4 PhotoImage-uri
-            self.img_bin_disp = tk.PhotoImage(width=w, height=h)
-            self.img_dilat_1_disp = tk.PhotoImage(width=w, height=h)
-            self.img_dilat_2_disp = tk.PhotoImage(width=w, height=h)
-            self.img_dilat_3_disp = tk.PhotoImage(width=w, height=h)
-            
-            # Funcție auxiliară pentru a construi imaginea din matrice binară
-            def build_image_from_binary(img_bin_matrix):
-                rows = []
-                for y in range(h):
-                    line = []
-                    for x in range(w):
-                        if img_bin_matrix[y, x] == 1:
-                            line.append("#000000")  # Negru pentru obiect
-                        else:
-                            line.append("#ffffff")  # Alb pentru fond
-                    rows.append(f"{{{ ' '.join(line) }}}")
-                return rows
-            
-            # Construim imaginile
-            rows_orig = build_image_from_binary(img_bin)
-            rows_dilat_1 = build_image_from_binary(img_dilat_1)
-            rows_dilat_2 = build_image_from_binary(img_dilat_2)
-            rows_dilat_3 = build_image_from_binary(img_dilat_3)
-            
-            self.img_bin_disp.put(" ".join(rows_orig))
-            self.img_dilat_1_disp.put(" ".join(rows_dilat_1))
-            self.img_dilat_2_disp.put(" ".join(rows_dilat_2))
-            self.img_dilat_3_disp.put(" ".join(rows_dilat_3))
-            
-            # AFISARE
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-            
-            tk.Label(container, text="Dilatare (Expandare Obiecte Albe)", font=("Arial", 18, "bold")).pack(pady=10)
-            
-            row_frame = tk.Frame(container)
-            row_frame.pack()
-            
-            for img, titlu in zip([self.img_bin_disp, self.img_dilat_1_disp, self.img_dilat_2_disp, self.img_dilat_3_disp],
-                                  ["Original", "Dilatare 1x", "Dilatare 2x", "Dilatare 3x"]):
-                f = tk.Frame(row_frame)
-                f.pack(side="left", padx=10)
-                tk.Label(f, image=img).pack()
-                tk.Label(f, text=titlu, font=("Arial", 10, "bold")).pack(pady=5)
-            
-            self.adauga_butoane_inapoi_cu_prag()
-            
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
+        self.adauga_butoane_inapoi_cu_prag()
+
 
     def aplicare_eroziune(self):
-        """
-        Aplica operația de eroziune pe imaginea binarizată din memorie.
-        Afișează imaginea originală și versiunile erodată (1x, 2x, 3x iterații) side-by-side.
-        """
-        try:
-            # Setez functia curenta pentru relansare dupa schimbarea pragului
-            self.functie_curenta = 'aplicare_eroziune'
+        """Aplica operația de eroziune pe imaginea binarizată."""
+        self.functie_curenta = 'aplicare_eroziune'
+        dims = self.verificare_daca_exista_imagine_incarcata()
+        if dims is None: return
+        h, w = dims
+        
+        prag = self.prag_utilizator if self.prag_utilizator is not None else int(self.cv_img_rgb.mean())
+        img_bin = self.logica_binarizare(prag=prag)
+        
+        imgs = [img_bin]
+        for i in range(1, 4):
+            imgs.append(self.eroziune(img_bin, kernel_size=3, iteratii=i))
             
-            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
-                result = self.procesare_imagine()
-                if result is None:
-                    return
+        titluri = ["Original", "Eroziune 1x", "Eroziune 2x", "Eroziune 3x"]
+        photos = []
+        for img in imgs:
+            img_rgb = np.ones((h, w, 3), dtype=np.uint8) * 255
+            img_rgb[img == 1] = [0, 0, 0]
+            p, _, _ = self.matrice_la_imagine(img_rgb)
+            photos.append(p)
             
-            cv_img_rgb = self.cv_img_rgb
-            h, w = cv_img_rgb.shape[:2]
+        self.curata_ecranul()
+        container = tk.Frame(self)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(container, text="Eroziune (Micșorare Obiecte)", font=("Arial", 18, "bold")).pack(pady=10)
+        
+        row_frame = tk.Frame(container); row_frame.pack()
+        for p, t in zip(photos, titluri):
+            f = tk.Frame(row_frame); f.pack(side="left", padx=10)
+            lbl = tk.Label(f, image=p); lbl.image = p; lbl.pack()
+            tk.Label(f, text=t, font=("Arial", 10, "bold")).pack(pady=5)
             
-            # Calculeaza pragul adaptiv (implicit este media imaginii, dar poate fi schimbat)
-            prag = self.prag_utilizator if self.prag_utilizator is not None else int(cv_img_rgb.mean())
-            
-            # Binarizează imaginea
-            img_bin = self.logica_binarizare(prag=prag)
-            
-            # Aplică eroziune cu 1, 2 și 3 iterații
-            img_eroz_1 = self.eroziune(img_bin, kernel_size=3, iteratii=1)
-            img_eroz_2 = self.eroziune(img_bin, kernel_size=3, iteratii=2)
-            img_eroz_3 = self.eroziune(img_bin, kernel_size=3, iteratii=3)
-            
-            # Cream 4 PhotoImage-uri
-            self.img_bin_disp_e = tk.PhotoImage(width=w, height=h)
-            self.img_eroz_1_disp = tk.PhotoImage(width=w, height=h)
-            self.img_eroz_2_disp = tk.PhotoImage(width=w, height=h)
-            self.img_eroz_3_disp = tk.PhotoImage(width=w, height=h)
-            
-            # Funcție auxiliară pentru a construi imaginea din matrice binară
-            def build_image_from_binary(img_bin_matrix):
-                rows = []
-                for y in range(h):
-                    line = []
-                    for x in range(w):
-                        if img_bin_matrix[y, x] == 1:
-                            line.append("#000000")  # Negru pentru obiect
-                        else:
-                            line.append("#ffffff")  # Alb pentru fond
-                    rows.append(f"{{{ ' '.join(line) }}}")
-                return rows
-            
-            # Construim imaginile
-            rows_orig = build_image_from_binary(img_bin)
-            rows_eroz_1 = build_image_from_binary(img_eroz_1)
-            rows_eroz_2 = build_image_from_binary(img_eroz_2)
-            rows_eroz_3 = build_image_from_binary(img_eroz_3)
-            
-            self.img_bin_disp_e.put(" ".join(rows_orig))
-            self.img_eroz_1_disp.put(" ".join(rows_eroz_1))
-            self.img_eroz_2_disp.put(" ".join(rows_eroz_2))
-            self.img_eroz_3_disp.put(" ".join(rows_eroz_3))
-            
-            # AFISARE
-            self.curata_ecranul()
-            container = tk.Frame(self)
-            container.place(relx=0.5, rely=0.5, anchor="center")
-            
-            tk.Label(container, text="Eroziune (Micșorare Obiecte Albe)", font=("Arial", 18, "bold")).pack(pady=10)
-            
-            row_frame = tk.Frame(container)
-            row_frame.pack()
-            
-            for img, titlu in zip([self.img_bin_disp_e, self.img_eroz_1_disp, self.img_eroz_2_disp, self.img_eroz_3_disp],
-                                  ["Original", "Eroziune 1x", "Eroziune 2x", "Eroziune 3x"]):
-                f = tk.Frame(row_frame)
-                f.pack(side="left", padx=10)
-                tk.Label(f, image=img).pack()
-                tk.Label(f, text=titlu, font=("Arial", 10, "bold")).pack(pady=5)
-            
-            self.adauga_butoane_inapoi_cu_prag()
-            
-        except Exception as e:
-            self.afiseaza_eroare(str(e))
+        self.adauga_butoane_inapoi_cu_prag()
+
 
 
 # Daca vreo imagien nu este tratata corespunzator, trebuie doar sa setez un prag mai mic, de ex 127.
@@ -2795,6 +2242,508 @@ class Aplicatie(tk.Tk):
             
         except Exception as e:
             self.afiseaza_eroare(str(e))
+
+    def aplicare_fourier_transform(self):
+        """
+        Aplica Transformata Fourier Discreta (DFT) pe imaginea curenta si afiseaza spectrul de frecvente.
+        Utilizeaza numpy.fft pentru a calcula transformata si creeaza o imagine a magnitudinii.
+        """
+        try:
+            # Verificam daca avem o imagine in memorie
+            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
+                result = self.procesare_imagine()
+                if result is None:
+                    return
+            
+            cv_img_rgb = self.cv_img_rgb
+            h, w = cv_img_rgb.shape[:2]
+            
+            # Convertim imaginea in scala de gri
+            pixels_gray = np.zeros((h, w))
+            for y in range(h):
+                for x in range(w):
+                    r, g, b = cv_img_rgb[y, x].astype(float)
+                    # Folosim formula Luma pentru conversie in scala de gri
+                    gray = 0.299 * r + 0.587 * g + 0.114 * b
+                    pixels_gray[y, x] = gray
+            
+            # Aplicam Transformata Fourier Discreta (DFT) pe intreaga imagine 2D
+            dft = self.discrete_fourier_transform_2d(pixels_gray)
+            
+            # Cream imaginea magnitudinii spectrului de frecvente
+            magnitude_image = self.create_magnitude_image(dft, h, w)
+            
+            # Cream PhotoImage din imaginea magnitudinii
+            self.img_fourier = tk.PhotoImage(width=w, height=h)
+            
+            rows = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = magnitude_image[y, x]
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows.append(f"{{{ ' '.join(line) }}}")
+            
+            self.img_fourier.put(" ".join(rows))
+            
+            # AFISARE REZULTATE
+            self.curata_ecranul()
+            
+            container = tk.Frame(self)
+            container.place(relx=0.5, rely=0.5, anchor="center")
+            
+            tk.Label(container, text="Spectrul de Frecvente (Magnitudine Fourier)", font=("Arial", 18, "bold")).pack(pady=10)
+            
+            img_label = tk.Label(container, image=self.img_fourier)
+            img_label.pack()
+            
+            info_text = f"Dimensiuni: {w}x{h} px"
+            tk.Label(container, text=info_text, font=("Arial", 12), fg="gray").pack(pady=5)
+            
+            self.adauga_buton_inapoi()
+            
+        except Exception as e:
+            self.afiseaza_eroare(str(e))
+    
+    def discrete_fourier_transform_2d(self, pixels):
+        """
+        Calculeaza Transformata Fourier Discreta (DFT) in 2D pe o matrice de pixeli.
+        Utilizeaza separabilitatea DFT: aplica FFT pe fiecare linie, apoi pe fiecare coloana.
+        
+        Echivalent cu codul Java:
+        - for (int y = 0; y < height; y++) { Complex[] row = transformer.transform(...); }
+        - for (int x = 0; x < width; x++) { Complex[] column = transformer.transform(...); }
+        
+        Args:
+            pixels: matrice bidimensionala de pixeli in scala de gri
+        
+        Returns:
+            matrice bidimensionala de numere complexe reprezentand transformata Fourier
+        """
+        h, w = pixels.shape
+        
+        # Pas 1: Aplicam FFT pe fiecare linie - echivalent cu DFT.transform(input[y])
+        dft_rows = np.zeros((h, w), dtype=complex)
+        for y in range(h):
+            dft_rows[y, :] = np.fft.fft(pixels[y, :])
+        
+        # Pas 2: Aplicam FFT pe fiecare coloana a rezultatului anterior - echivalent cu DFT.transform(getColumn(...))
+        dft_2d = np.zeros((h, w), dtype=complex)
+        for x in range(w):
+            dft_2d[:, x] = np.fft.fft(dft_rows[:, x])
+        
+        return dft_2d
+    
+    def create_magnitude_image(self, dft, height, width):
+        """
+        Creeaza o imagine a spectrului de frecvente din transformata Fourier.
+        Calculeaza magnitudinea fiecarui element complex si o normalizeaza pentru afisare.
+        
+        Echivalent cu codul Java:
+        - double magnitude = dft[x][y].abs();
+        - int color = (int) (255 * magnitude / maxMagnitude);
+        
+        Args:
+            dft: matrice bidimensionala de numere complexe (transformata Fourier)
+            height: inaltimea imaginii
+            width: latimea imaginii
+        
+        Returns:
+            matrice de pixeli (0-255) reprezentand magnitudinea spectrului
+        """
+        # Calculam magnitudinea (modulul) fiecarui element complex
+        magnitude = np.abs(dft)
+        
+        # Centram spectrul de frecvente (low frequencies in centru) - mai vizibil
+        magnitude_shifted = np.fft.fftshift(magnitude)
+        
+        # Aplicam logaritmul pentru a face spectrul mai vizibil
+        # (high frequencies devine mai vizibil, low frequencies nu domina imaginea)
+        magnitude_log = np.log1p(magnitude_shifted)
+        
+        # Normalizare intre 0 si 255 pentru afisare
+        max_log = np.max(magnitude_log)
+        if max_log == 0:
+            max_log = 1
+        
+        magnitude_normalized = ((magnitude_log / max_log) * 255).astype(np.uint8)
+        
+        return magnitude_normalized
+    
+    def aplicare_filtru_mediere(self):
+        """Aplica filtru de mediere (averaging filter) cu kernel 3x3."""
+        self.incarcare_si_procesare_imagine(self.filtru_mediere, "Filtru de Mediere (3x3)", "Original", "Filtrat")
+
+    
+    def filtru_mediere(self, image):
+        """
+        Aplica filtrul de mediere cu kernel 3x3.
+        Fiecare pixel este inlocuit cu media ponderata a pixelilor din vecinatate.
+        
+        Args:
+            image: imaginea de intrare (RGB)
+        
+        Returns:
+            imaginea filtrata
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image)
+        
+        # Kernel de mediere 3x3 - toti coeficientii sunt 1/9
+        kernel = np.array([[1/9, 1/9, 1/9],
+                          [1/9, 1/9, 1/9],
+                          [1/9, 1/9, 1/9]])
+        
+        # Parcurgem pixelii cu padding (ignoram marginile)
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                # Extraem fereastra 3x3 in jurul pixelului curent
+                window = image[j-1:j+2, i-1:i+2]
+                
+                # Calculam suma ponderata pentru fiecare canal
+                r_sum = np.sum(window[:, :, 0] * kernel)
+                g_sum = np.sum(window[:, :, 1] * kernel)
+                b_sum = np.sum(window[:, :, 2] * kernel)
+                
+                # Setam pixelul in imagine rezultata
+                result[j, i, 0] = np.clip(r_sum, 0, 255).astype(np.uint8)
+                result[j, i, 1] = np.clip(g_sum, 0, 255).astype(np.uint8)
+                result[j, i, 2] = np.clip(b_sum, 0, 255).astype(np.uint8)
+        
+        # Copiem marginile din imaginea originala (nu le procesam)
+        result[0, :] = image[0, :]
+        result[-1, :] = image[-1, :]
+        result[:, 0] = image[:, 0]
+        result[:, -1] = image[:, -1]
+        
+        return result
+    
+    def aplicare_filtru_median(self):
+        """Aplica filtru median cu kernel 3x3."""
+        self.incarcare_si_procesare_imagine(self.filtru_median, "Filtru Median (3x3)", "Original", "Filtrat")
+
+    
+    def filtru_median(self, image):
+        """
+        Aplica filtrul median cu kernel 3x3.
+        Fiecare pixel este inlocuit cu mediana pixelilor din vecinatate.
+        Excelent pentru eliminarea zgomotului salt-and-pepper.
+        
+        Args:
+            image: imaginea de intrare (RGB)
+        
+        Returns:
+            imaginea filtrata
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image)
+        
+        # Parcurgem pixelii cu padding (ignoram marginile)
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                # Extraem fereastra 3x3 in jurul pixelului curent
+                window = image[j-1:j+2, i-1:i+2]
+                
+                # Calculam mediana pentru fiecare canal (R, G, B)
+                r_median = np.median(window[:, :, 0])
+                g_median = np.median(window[:, :, 1])
+                b_median = np.median(window[:, :, 2])
+                
+                # Setam pixelul in imagine rezultata
+                result[j, i, 0] = np.uint8(r_median)
+                result[j, i, 1] = np.uint8(g_median)
+                result[j, i, 2] = np.uint8(b_median)
+        
+        # Copiem marginile din imaginea originala (nu le procesam)
+        result[0, :] = image[0, :]
+        result[-1, :] = image[-1, :]
+        result[:, 0] = image[:, 0]
+        result[:, -1] = image[:, -1]
+        
+        return result
+    
+    def aplicare_filtru_minim(self):
+        """Aplica filtru de minim cu kernel 3x3."""
+        self.incarcare_si_procesare_imagine(self.filtru_minim, "Filtru de Minim (3x3)", "Original", "Filtrat")
+
+    
+    def filtru_minim(self, image):
+        """
+        Aplica filtrul de minim cu kernel 3x3.
+        Fiecare pixel este inlocuit cu valoarea minima din vecinatate.
+        Acesta este un filtru de eroziune ce face ca obiectele negre sa se extinda.
+        
+        Args:
+            image: imaginea de intrare (RGB)
+        
+        Returns:
+            imaginea filtrata
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image)
+        
+        # Parcurgem pixelii cu padding (ignoram marginile)
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                # Extraem fereastra 3x3 in jurul pixelului curent
+                window = image[j-1:j+2, i-1:i+2]
+                
+                # Calculam valoarea minima pentru fiecare canal (R, G, B)
+                r_min = np.min(window[:, :, 0])
+                g_min = np.min(window[:, :, 1])
+                b_min = np.min(window[:, :, 2])
+                
+                # Setam pixelul in imagine rezultata
+                result[j, i, 0] = np.uint8(r_min)
+                result[j, i, 1] = np.uint8(g_min)
+                result[j, i, 2] = np.uint8(b_min)
+        
+        # Copiem marginile din imaginea originala (nu le procesam)
+        result[0, :] = image[0, :]
+        result[-1, :] = image[-1, :]
+        result[:, 0] = image[:, 0]
+        result[:, -1] = image[:, -1]
+        
+        return result
+    
+    def aplicare_filtru_maxim(self):
+        """Aplica filtru de maxim cu kernel 3x3."""
+        self.incarcare_si_procesare_imagine(self.filtru_maxim, "Filtru de Maxim (3x3)", "Original", "Filtrat")
+
+    
+    def filtru_maxim(self, image):
+        """
+        Aplica filtrul de maxim cu kernel 3x3.
+        Fiecare pixel este inlocuit cu valoarea maxima din vecinatate.
+        Acesta este un filtru de dilatare ce face ca obiectele luminoase sa se extinda.
+        
+        Args:
+            image: imaginea de intrare (RGB)
+        
+        Returns:
+            imaginea filtrata
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image)
+        
+        # Parcurgem pixelii cu padding (ignoram marginile)
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                # Extraem fereastra 3x3 in jurul pixelului curent
+                window = image[j-1:j+2, i-1:i+2]
+                
+                # Calculam valoarea maxima pentru fiecare canal (R, G, B)
+                r_max = np.max(window[:, :, 0])
+                g_max = np.max(window[:, :, 1])
+                b_max = np.max(window[:, :, 2])
+                
+                # Setam pixelul in imagine rezultata
+                result[j, i, 0] = np.uint8(r_max)
+                result[j, i, 1] = np.uint8(g_max)
+                result[j, i, 2] = np.uint8(b_max)
+        
+        # Copiem marginile din imaginea originala (nu le procesam)
+        result[0, :] = image[0, :]
+        result[-1, :] = image[-1, :]
+        result[:, 0] = image[:, 0]
+        result[:, -1] = image[:, -1]
+        
+        return result
+    
+    def aplicare_filtru_accentuare(self):
+        """Aplica filtru de accentuare cu kernel 3x3."""
+        self.incarcare_si_procesare_imagine(self.filtru_accentuare, "Filtru de Accentuare (3x3)", "Original", "Filtrat")
+
+    
+    def filtru_accentuare(self, image):
+        """
+        Aplica filtrul de accentuare cu kernel 3x3.
+        Fiecare pixel este inlocuit cu: pixel_original + 0.6 * suma_ponderata_vecini
+        
+        Kernel-ul folosit:
+            [0    -1/4   0  ]
+            [-1/4  1    -1/4]
+            [0    -1/4   0  ]
+        
+        Args:
+            image: imaginea de intrare (RGB)
+        
+        Returns:
+            imaginea filtrata accentuata
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image, dtype=np.float64)
+        
+        # Kernel-ul de accentuare
+        kernel = np.array([[0,    -1/4,  0   ],
+                          [-1/4,   1,   -1/4],
+                          [0,    -1/4,  0   ]])
+        
+        # Parcurgem pixelii cu padding (ignoram marginile)
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                # Extraem fereastra 3x3 in jurul pixelului curent
+                window = image[j-1:j+2, i-1:i+2].astype(np.float64)
+                
+                # Calculam suma ponderata pentru fiecare canal
+                for c in range(3):  # R, G, B
+                    # Suma ponderata = kernel * window_canal
+                    suma = np.sum(kernel * window[:, :, c])
+                    
+                    # Pixelul original din centrul ferestrei
+                    pixel_orig = image[j, i, c]
+                    
+                    # Aplicam formula: pixel_nou = pixel_orig + 0.6 * suma
+                    pixel_nou = pixel_orig + 0.6 * suma
+                    
+                    # Ajustam valoarea sa fie in intervalul [0, 255]
+                    result[j, i, c] = self.adjust_color(pixel_nou)
+        
+        # Copiem marginile din imaginea originala (nu le procesam)
+        result[0, :] = image[0, :]
+        result[-1, :] = image[-1, :]
+        result[:, 0] = image[:, 0]
+        result[:, -1] = image[:, -1]
+        
+        return result.astype(np.uint8)
+    
+    def adjust_color(self, value):
+        """
+        Ajusteaza valoarea de culoare pentru a fi in intervalul [0, 255].
+        Clipeaza valorile care depasesc limitele.
+        
+        Args:
+            value: valoarea de culoare (poate fi float)
+        
+        Returns:
+            valoare clipeata in [0, 255]
+        """
+        return np.clip(value, 0, 255)
+    
+    def aplicare_floyd_steinberg(self):
+        """Aplica algoritmul Floyd-Steinberg de dithering."""
+        def logica(img):
+            palette = self.create_default_palette()
+            return self.floyd_steinberg(img, palette)
+            
+        self.incarcare_si_procesare_imagine(logica, "Floyd-Steinberg Dithering", "Original", "Floyd-Steinberg")
+
+    
+    def create_default_palette(self):
+        """
+        Creeaza o paleta de culori predefinita pentru dithering.
+        Utilizeaza o paleta de 8 culori (cubic palette: 2x2x2 culori).
+        
+        Returns:
+            lista de tuple (R, G, B) reprezentand paletă
+        """
+        palette = [
+            (0, 0, 0),           # Black
+            (255, 0, 0),         # Red
+            (0, 255, 0),         # Green
+            (0, 0, 255),         # Blue
+            (255, 255, 0),       # Yellow
+            (255, 0, 255),       # Magenta
+            (0, 255, 255),       # Cyan
+            (255, 255, 255)      # White
+        ]
+        return palette
+    
+    def floyd_steinberg(self, image, palette):
+        """
+        Aplica algoritmul Floyd-Steinberg de dithering pe imagine.
+        Reduce paletă de culori si distribuie eroarea de cuantificare.
+        
+        Ponderile de distribuție a erorii:
+                    X    7/16
+            3/16    5/16  1/16
+        
+        Args:
+            image: imaginea de intrare (RGB)
+            palette: lista de culori disponibile (tuple R,G,B)
+        
+        Returns:
+            imaginea dithered
+        """
+        h, w = image.shape[:2]
+        # Copiem imaginea si lucram cu float pentru a permite distribuția erorii
+        img = image.astype(np.float64).copy()
+        result = np.zeros_like(image, dtype=np.uint8)
+        
+        # Parcurgem fiecare pixel
+        for y in range(h):
+            for x in range(w):
+                # Pixelul original
+                old_pixel = img[y, x].copy()
+                
+                # Gasim cea mai apropiata culoare din paleta
+                new_pixel = self.get_nearest_color(old_pixel, palette)
+                result[y, x] = new_pixel
+                
+                # Calculam eroarea de cuantificare pentru fiecare canal
+                error = old_pixel - new_pixel
+                
+                # Distribuim eroarea la pixelii vecini conform Floyd-Steinberg
+                # Dreapta (x+1, y)
+                if x + 1 < w:
+                    img[y, x + 1] += error * (7 / 16)
+                
+                # Stanga-jos (x-1, y+1)
+                if x - 1 >= 0 and y + 1 < h:
+                    img[y + 1, x - 1] += error * (3 / 16)
+                
+                # Jos (x, y+1)
+                if y + 1 < h:
+                    img[y + 1, x] += error * (5 / 16)
+                
+                # Dreapta-jos (x+1, y+1)
+                if x + 1 < w and y + 1 < h:
+                    img[y + 1, x + 1] += error * (1 / 16)
+        
+        return result
+    
+    def get_nearest_color(self, pixel_rgb, palette):
+        """
+        Gaseste cea mai apropiata culoare din paleta pentru un pixel dat.
+        Utilizeaza distanta Euclidiana in spatiul RGB.
+        
+        Args:
+            pixel_rgb: culoarea pixelului (array R,G,B sau tuple)
+            palette: lista de culori disponibile (tuple R,G,B)
+        
+        Returns:
+            tuple (R,G,B) cu cea mai apropiata culoare din paleta
+        """
+        nearest_color = palette[0]
+        nearest_distance = float('inf')
+        
+        # Clipeaza pixelul la [0, 255] inainte de comparare
+        pixel_clipped = np.clip(pixel_rgb, 0, 255)
+        
+        for color in palette:
+            dist = self.euclidean_distance(pixel_clipped, color)
+            if dist < nearest_distance:
+                nearest_distance = dist
+                nearest_color = color
+        
+        return np.array(nearest_color, dtype=np.uint8)
+    
+    def euclidean_distance(self, color1, color2):
+        """
+        Calculeaza distanta Euclidiana intre doua culori in spatiul RGB.
+        
+        Args:
+            color1: tuple sau array (R1, G1, B1)
+            color2: tuple sau array (R2, G2, B2)
+        
+        Returns:
+            distanta Euclidiana
+        """
+        r1, g1, b1 = color1[0], color1[1], color1[2]
+        r2, g2, b2 = color2[0], color2[1], color2[2]
+        
+        dist = math.sqrt((r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2)
+        return dist
 
 if __name__ == "__main__":
     app = Aplicatie()
