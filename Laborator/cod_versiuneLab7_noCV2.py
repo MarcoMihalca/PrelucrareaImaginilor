@@ -21,6 +21,10 @@ class Aplicatie(tk.Tk):
         self.prag_utilizator = None  # Pragul ales de utilizator (None = default)
         self.functie_curenta = None  # Functia care se executa (pentru a o relansa dupa schimbarea pragului)
 
+        # Variabile pentru Transformata Fourier (binarizare + tracking)
+        self.fourier_use_binarization = False  # Flag pentru a aplica binarizare inainte de DFT
+        self.fourier_inverse_active = False    # Track daca inverse Fourier e activa
+
         self.afiseaza_mesaj_bienvenue()
 
     def curata_ecranul(self):
@@ -57,48 +61,70 @@ class Aplicatie(tk.Tk):
         bara_principala.add_cascade(label="File", menu=file_menu)
 
         # ==========================================
-        # 3. Construim meniul "Tools"
+        # 3. Construim meniul "Tools" cu Submenu-uri
         # ==========================================
         tools_menu = tk.Menu(bara_principala, tearoff=0)
-        tools_menu.add_command(label="Convertire Imagine in Alb si Negru", command=self.aplicare_grayscale_3exemplare)
-        tools_menu.add_command(label="Convertire RGB in YUV", command=self.aplicare_conversie_RGB_in_YUV)
-        tools_menu.add_command(label="Convertire RGB in YCbCr", command=self.aplicare_conversie_RGB_in_YCbCr)
-        tools_menu.add_command(label="Imagine inversa (RGB)", command=self.aplicare_inversare_RGB)
-        tools_menu.add_command(label="Binarizare", command=self.aplicare_binarizare)
-        tools_menu.add_command(label="Calculare centru de masa", command=self.calculare_centru_de_masa)
-        tools_menu.add_separator()
-        # De implementat pe viitor
-        # tools_menu.add_separator()
-        # tools_menu.add_command(label="Comparare conversii imagini", command=self.comparare_conversii)
-        tools_menu.add_command(label="Convertire RGB in HSV", command=self.aplicare_conversie_RGB_in_HSV)
-        tools_menu.add_command(label="Histograma imagine gri", command=self.afisare_histograma)
-        tools_menu.add_command(label="Egalizare Histograma (Contrast)", command=self.aplicare_egalizare_histograma)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Dilatare", command=self.aplicare_dilatare)
-        tools_menu.add_command(label="Eroziune", command=self.aplicare_eroziune)
-        tools_menu.add_command(label="Dilatare Repetitiva (Alegere Iteratii)", command=self.aplicare_dilatare_repetitiva)
-        tools_menu.add_command(label="Eroziune Repetitiva (Alegere Iteratii)", command=self.aplicare_eroziune_repetitiva)
-        tools_menu.add_command(label="Deschidere (Eroziune + Dilatare)", command=self.aplicare_deschidere)
-        tools_menu.add_command(label="Inchidere (Dilatare + Eroziune)", command=self.aplicare_inchidere)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Moment de ordin 1", command=self.calculare_moment_ordin_1)
-        tools_menu.add_command(label="Moment de ordin 2", command=self.calculare_moment_ordin_2)
-        tools_menu.add_command(label="Matrice de covarianta", command=self.calculare_matrice_covarianta)
-        tools_menu.add_command(label="Proiectii orizontala/verticala", command=self.calculare_proiectii)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Afisare etichetare obiecte", command=self.aplicare_etichetare)
-        tools_menu.add_command(label="Afisare etichetare obiecte cu selectie", command=self.aplicare_etichetare_cu_selectie)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Transformata Fourier (Spectru de Frecvente)", command=self.aplicare_fourier_transform)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Filtru de Mediere (3x3)", command=self.aplicare_filtru_mediere)
-        tools_menu.add_command(label="Filtru Median (3x3)", command=self.aplicare_filtru_median)
-        tools_menu.add_command(label="Filtru de Minim (3x3)", command=self.aplicare_filtru_minim)
-        tools_menu.add_command(label="Filtru de Maxim (3x3)", command=self.aplicare_filtru_maxim)
-        tools_menu.add_command(label="Filtru de Accentuare (3x3)", command=self.aplicare_filtru_accentuare)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Dithering Floyd-Steinberg", command=self.aplicare_floyd_steinberg)
-
+        
+        # CONVERSII DE CULORI
+        conversii_menu = tk.Menu(tools_menu, tearoff=0)
+        conversii_menu.add_command(label="Convertire în Alb-Negru", command=self.aplicare_grayscale_3exemplare)
+        conversii_menu.add_command(label="RGB → YUV", command=self.aplicare_conversie_RGB_in_YUV)
+        conversii_menu.add_command(label="RGB → YCbCr", command=self.aplicare_conversie_RGB_in_YCbCr)
+        conversii_menu.add_command(label="RGB → HSV", command=self.aplicare_conversie_RGB_in_HSV)
+        tools_menu.add_cascade(label="Conversii Culori", menu=conversii_menu)
+        
+        # OPERAȚII DE BAZĂ
+        operatii_menu = tk.Menu(tools_menu, tearoff=0)
+        operatii_menu.add_command(label="Imagine Inversă (RGB)", command=self.aplicare_inversare_RGB)
+        operatii_menu.add_command(label="Binarizare", command=self.aplicare_binarizare)
+        tools_menu.add_cascade(label="Operații de Bază", menu=operatii_menu)
+        
+        # STATISTICĂ
+        statistica_menu = tk.Menu(tools_menu, tearoff=0)
+        statistica_menu.add_command(label="Histograma Imagine Gri", command=self.afisare_histograma)
+        statistica_menu.add_command(label="Egalizare Histograma (Contrast)", command=self.aplicare_egalizare_histograma)
+        statistica_menu.add_command(label="Calculare Centru de Masă", command=self.calculare_centru_de_masa)
+        tools_menu.add_cascade(label="Statistică", menu=statistica_menu)
+        
+        # FILTRE
+        filtre_menu = tk.Menu(tools_menu, tearoff=0)
+        filtre_menu.add_command(label="Filtru de Mediere (3x3)", command=self.aplicare_filtru_mediere)
+        filtre_menu.add_command(label="Filtru Median (3x3)", command=self.aplicare_filtru_median)
+        filtre_menu.add_command(label="Filtru Minim (3x3)", command=self.aplicare_filtru_minim)
+        filtre_menu.add_command(label="Filtru Maxim (3x3)", command=self.aplicare_filtru_maxim)
+        filtre_menu.add_command(label="Filtru Accentuare (3x3)", command=self.aplicare_filtru_accentuare)
+        filtre_menu.add_command(label="Dithering Floyd-Steinberg", command=self.aplicare_floyd_steinberg)
+        tools_menu.add_cascade(label="Filtre", menu=filtre_menu)
+        
+        # MORFOLOGIE
+        morfologie_menu = tk.Menu(tools_menu, tearoff=0)
+        morfologie_menu.add_command(label="Dilatare", command=self.aplicare_dilatare)
+        morfologie_menu.add_command(label="Eroziune", command=self.aplicare_eroziune)
+        morfologie_menu.add_command(label="Dilatare Repetitivă (Alegere Iterații)", command=self.aplicare_dilatare_repetitiva)
+        morfologie_menu.add_command(label="Eroziune Repetitivă (Alegere Iterații)", command=self.aplicare_eroziune_repetitiva)
+        morfologie_menu.add_command(label="Deschidere (Eroziune + Dilatare)", command=self.aplicare_deschidere)
+        morfologie_menu.add_command(label="Inchidere (Dilatare + Eroziune)", command=self.aplicare_inchidere)
+        tools_menu.add_cascade(label="Morfologie", menu=morfologie_menu)
+        
+        # ANALIZĂ FORME
+        analiza_menu = tk.Menu(tools_menu, tearoff=0)
+        analiza_menu.add_command(label="Moment de Ordin 1", command=self.calculare_moment_ordin_1)
+        analiza_menu.add_command(label="Moment de Ordin 2", command=self.calculare_moment_ordin_2)
+        analiza_menu.add_command(label="Matrice de Covarianta", command=self.calculare_matrice_covarianta)
+        analiza_menu.add_command(label="Proiectii (Orizontală/Verticală)", command=self.calculare_proiectii)
+        tools_menu.add_cascade(label="Analiză Forme", menu=analiza_menu)
+        
+        # DETECTARE OBIECTE
+        detectare_menu = tk.Menu(tools_menu, tearoff=0)
+        detectare_menu.add_command(label="Afisare Etichetare Obiecte", command=self.aplicare_etichetare)
+        detectare_menu.add_command(label="Afisare Etichetare Obiecte cu Selectie", command=self.aplicare_etichetare_cu_selectie)
+        tools_menu.add_cascade(label="Detectare Obiecte", menu=detectare_menu)
+        
+        # TRANSFORMATE FRECVENȚĂ (FOURIER)
+        fourier_menu = tk.Menu(tools_menu, tearoff=0)
+        fourier_menu.add_command(label="Transformata Fourier (DFT)", command=self.aplicare_fourier_transform)
+        fourier_menu.add_command(label="Transformata Fourier Inversă (IDFT)", command=self.aplicare_inverse_fourier_transform)
+        tools_menu.add_cascade(label="Fourier", menu=fourier_menu)
         
         # Il atasam la ACEEASI bara principala, langa File
         bara_principala.add_cascade(label="Tools", menu=tools_menu)
@@ -139,6 +165,70 @@ class Aplicatie(tk.Tk):
             command=self.ecran_principal
         )
         buton.pack(padx=5, pady=5)
+
+    def adauga_butoane_fourier(self, is_inverse=False):
+        """
+        Adauga butoane pentru Fourier/Inverse Fourier: 'Binarizare' si 'Inapoi'
+        
+        Args:
+            is_inverse: True daca e pe ecranul inverse Fourier
+        """
+        buton_frame = tk.Frame(self, bg=self.cget("bg"))
+        buton_frame.place(relx=0.95, rely=0.95, anchor="se")
+        
+        # Buton pentru binarizare
+        buton_binarizare = tk.Button(
+            buton_frame,
+            text="Binarizare",
+            font=("Arial", 10),
+            bg="#FF9800",
+            fg="white",
+            padx=10,
+            pady=5,
+            command=lambda: self.toggle_fourier_binarization(is_inverse)
+        )
+        buton_binarizare.pack(side="left", padx=5, pady=5)
+        
+        # Buton inapoi
+        buton_inapoi = tk.Button(
+            buton_frame,
+            text="Înapoi",
+            font=("Arial", 10),
+            bg="#f44336",
+            fg="white",
+            padx=10,
+            pady=5,
+            command=self.reset_fourier_and_return
+        )
+        buton_inapoi.pack(side="left", padx=5, pady=5)
+
+    def toggle_fourier_binarization(self, is_inverse=False):
+        """Comuta flag-ul binarizarii si recomuta functia Fourier activa"""
+        self.fourier_use_binarization = not self.fourier_use_binarization
+        
+        if is_inverse:
+            self.aplicare_inverse_fourier_transform()
+        else:
+            self.aplicare_fourier_transform()
+
+    def reset_fourier_and_return(self):
+        """Reseteaza flag-ul binarizarii si se intoarce la meniu principal"""
+        self.fourier_use_binarization = False
+        self.fourier_inverse_active = False
+        self.ecran_principal()
+
+    def binarizeaza_grayscale(self, pixels_gray, prag=127):
+        """
+        Binarizeaza o imagine in scala de gri.
+        
+        Args:
+            pixels_gray: matrice 2D cu valori de gri
+            prag: pragul de binarizare (default 127)
+        
+        Returns:
+            matrice binarizata (0 sau 255)
+        """
+        return np.where(pixels_gray >= prag, 255, 0).astype(np.uint8)
 
     def afiseaza_eroare(self, mesaj_eroare):
         """Afiseaza o pagina cu mesajul de eroare si butonul de revenire"""
@@ -2245,8 +2335,10 @@ class Aplicatie(tk.Tk):
 
     def aplicare_fourier_transform(self):
         """
-        Aplica Transformata Fourier Discreta (DFT) pe imaginea curenta si afiseaza spectrul de frecvente.
-        Utilizeaza numpy.fft pentru a calcula transformata si creeaza o imagine a magnitudinii.
+        Aplica Transformata Fourier Discreta (DFT) pe imaginea curenta si afiseaza:
+        1. Imaginea originala (grayscale) - opțional binarizata
+        2. Imaginea reconstruita din IDFT
+        3. Spectrul de frecvente (magnitudinea)
         """
         try:
             # Verificam daca avem o imagine in memorie
@@ -2254,6 +2346,8 @@ class Aplicatie(tk.Tk):
                 result = self.procesare_imagine()
                 if result is None:
                     return
+            
+            self.fourier_inverse_active = False  # Marcheaza ca nu e inverse
             
             cv_img_rgb = self.cv_img_rgb
             h, w = cv_img_rgb.shape[:2]
@@ -2267,40 +2361,80 @@ class Aplicatie(tk.Tk):
                     gray = 0.299 * r + 0.587 * g + 0.114 * b
                     pixels_gray[y, x] = gray
             
+            # APLICAM BINARIZARE DACA FLAG-UL ESTE ACTIVAT
+            if self.fourier_use_binarization:
+                pixels_gray = self.binarizeaza_grayscale(pixels_gray)
+            
             # Aplicam Transformata Fourier Discreta (DFT) pe intreaga imagine 2D
             dft = self.discrete_fourier_transform_2d(pixels_gray)
+            
+            # Aplicam Transformata Fourier Inversa (IDFT) pentru a reconstrui imaginea
+            reconstructed = self.inverse_discrete_fourier_transform_2d(dft)
             
             # Cream imaginea magnitudinii spectrului de frecvente
             magnitude_image = self.create_magnitude_image(dft, h, w)
             
-            # Cream PhotoImage din imaginea magnitudinii
-            self.img_fourier = tk.PhotoImage(width=w, height=h)
+            # Cream PhotoImage din imaginea originala (grayscale)
+            self.img_fourier_original = tk.PhotoImage(width=w, height=h)
+            rows_original = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = int(pixels_gray[y, x]) % 256
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows_original.append(f"{{{ ' '.join(line) }}}")
+            self.img_fourier_original.put(" ".join(rows_original))
             
-            rows = []
+            # Cream PhotoImage din imaginea reconstruita
+            self.img_fourier_reconstructed = tk.PhotoImage(width=w, height=h)
+            rows_reconstructed = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = int(np.clip(reconstructed[y, x], 0, 255))
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows_reconstructed.append(f"{{{ ' '.join(line) }}}")
+            self.img_fourier_reconstructed.put(" ".join(rows_reconstructed))
+            
+            # Cream PhotoImage din imaginea magnitudinii
+            self.img_fourier_spectrum = tk.PhotoImage(width=w, height=h)
+            rows_spectrum = []
             for y in range(h):
                 line = []
                 for x in range(w):
                     color_val = magnitude_image[y, x]
                     line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
-                rows.append(f"{{{ ' '.join(line) }}}")
+                rows_spectrum.append(f"{{{ ' '.join(line) }}}")
+            self.img_fourier_spectrum.put(" ".join(rows_spectrum))
             
-            self.img_fourier.put(" ".join(rows))
-            
-            # AFISARE REZULTATE
+            # AFISARE REZULTATE (3 imagini)
             self.curata_ecranul()
             
             container = tk.Frame(self)
             container.place(relx=0.5, rely=0.5, anchor="center")
             
-            tk.Label(container, text="Spectrul de Frecvente (Magnitudine Fourier)", font=("Arial", 18, "bold")).pack(pady=10)
+            # Titlu cu indicare daca e binarizata
+            titlu_text = "Transformata Fourier (DFT -> IDFT)"
+            if self.fourier_use_binarization:
+                titlu_text += " - BINARIZATA"
+            tk.Label(container, text=titlu_text, font=("Arial", 18, "bold")).pack(pady=10)
             
-            img_label = tk.Label(container, image=self.img_fourier)
-            img_label.pack()
+            # Containerul orizontal pentru cele 3 imagini
+            row_frame = tk.Frame(container)
+            row_frame.pack()
+            
+            # Afisam cele 3 imagini
+            for img, titlu in zip([self.img_fourier_original, self.img_fourier_reconstructed, self.img_fourier_spectrum], 
+                                  ["Original (Grayscale)", "Reconstruita (IDFT)", "Spectru de Frecvente"]):
+                f = tk.Frame(row_frame)
+                f.pack(side="left", padx=10)
+                tk.Label(f, image=img).pack()
+                tk.Label(f, text=titlu, font=("Arial", 11, "bold")).pack()
             
             info_text = f"Dimensiuni: {w}x{h} px"
             tk.Label(container, text=info_text, font=("Arial", 12), fg="gray").pack(pady=5)
             
-            self.adauga_buton_inapoi()
+            self.adauga_butoane_fourier(is_inverse=False)
             
         except Exception as e:
             self.afiseaza_eroare(str(e))
@@ -2333,6 +2467,40 @@ class Aplicatie(tk.Tk):
             dft_2d[:, x] = np.fft.fft(dft_rows[:, x])
         
         return dft_2d
+    
+    def inverse_discrete_fourier_transform_2d(self, dft):
+        """
+        Calculeaza Transformata Fourier Inversa (IDFT) in 2D pe transformata Fourier.
+        Utilizeaza separabilitatea IDFT: aplica IFFT pe fiecare linie, apoi pe fiecare coloana.
+        Echivalent cu DFT inversa dar normalizata.
+        
+        Echivalent cu codul Java (IDFT):
+        - for (int y = 0; y < height; y++) { Complex[] row = transformer.inverseTransform(...); }
+        - for (int x = 0; x < width; x++) { Complex[] column = transformer.inverseTransform(...); }
+        
+        Args:
+            dft: matrice bidimensionala de numere complexe (transformata Fourier)
+        
+        Returns:
+            matrice bidimensionala de pixeli reconstruiti (0-255) in scala de gri
+        """
+        h, w = dft.shape
+        
+        # Pas 1: Aplicam IFFT pe fiecare linie
+        idft_rows = np.zeros((h, w), dtype=complex)
+        for y in range(h):
+            idft_rows[y, :] = np.fft.ifft(dft[y, :])
+        
+        # Pas 2: Aplicam IFFT pe fiecare coloana a rezultatului anterior
+        idft_2d = np.zeros((h, w), dtype=complex)
+        for x in range(w):
+            idft_2d[:, x] = np.fft.ifft(idft_rows[:, x])
+        
+        # Luam doar partea reala si normalizare la 0-255
+        reconstructed = np.real(idft_2d)
+        reconstructed = np.clip(reconstructed, 0, 255)
+        
+        return reconstructed
     
     def create_magnitude_image(self, dft, height, width):
         """
@@ -2369,6 +2537,115 @@ class Aplicatie(tk.Tk):
         magnitude_normalized = ((magnitude_log / max_log) * 255).astype(np.uint8)
         
         return magnitude_normalized
+    
+    def aplicare_inverse_fourier_transform(self):
+        """
+        Aplica Transformata Fourier Discreta (DFT) pe imaginea curenta, apoi Transformata Inversa (IDFT)
+        si afiseaza cele 3 etape:
+        1. Imaginea originala (grayscale) - opțional binarizata
+        2. Imaginea reconstruita din IDFT
+        3. Spectrul de frecvente (magnitudinea)
+        
+        Demonstreaza ca DFT -> IDFT recupereaza imaginea originala.
+        """
+        try:
+            # Verificam daca avem o imagine in memorie
+            if not hasattr(self, 'cv_img_rgb') or self.cv_img_rgb is None:
+                result = self.procesare_imagine()
+                if result is None:
+                    return
+            
+            self.fourier_inverse_active = True  # Marcheaza ca e inverse
+            
+            cv_img_rgb = self.cv_img_rgb
+            h, w = cv_img_rgb.shape[:2]
+            
+            # Convertim imaginea in scala de gri
+            pixels_gray = np.zeros((h, w))
+            for y in range(h):
+                for x in range(w):
+                    r, g, b = cv_img_rgb[y, x].astype(float)
+                    # Folosim formula Luma pentru conversie in scala de gri
+                    gray = 0.299 * r + 0.587 * g + 0.114 * b
+                    pixels_gray[y, x] = gray
+            
+            # APLICAM BINARIZARE DACA FLAG-UL ESTE ACTIVAT
+            if self.fourier_use_binarization:
+                pixels_gray = self.binarizeaza_grayscale(pixels_gray)
+            
+            # Aplicam Transformata Fourier Discreta (DFT) pe intreaga imagine 2D
+            dft = self.discrete_fourier_transform_2d(pixels_gray)
+            
+            # Aplicam Transformata Fourier Inversa (IDFT) pentru a reconstrui imaginea
+            reconstructed = self.inverse_discrete_fourier_transform_2d(dft)
+            
+            # Cream imaginea magnitudinii spectrului de frecvente
+            magnitude_image = self.create_magnitude_image(dft, h, w)
+            
+            # Cream PhotoImage din imaginea originala (grayscale)
+            self.img_inverse_original = tk.PhotoImage(width=w, height=h)
+            rows_original = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = int(pixels_gray[y, x]) % 256
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows_original.append(f"{{{ ' '.join(line) }}}")
+            self.img_inverse_original.put(" ".join(rows_original))
+            
+            # Cream PhotoImage din imaginea reconstruita
+            self.img_inverse_reconstructed = tk.PhotoImage(width=w, height=h)
+            rows_reconstructed = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = int(np.clip(reconstructed[y, x], 0, 255))
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows_reconstructed.append(f"{{{ ' '.join(line) }}}")
+            self.img_inverse_reconstructed.put(" ".join(rows_reconstructed))
+            
+            # Cream PhotoImage din imaginea magnitudinii
+            self.img_inverse_spectrum = tk.PhotoImage(width=w, height=h)
+            rows_spectrum = []
+            for y in range(h):
+                line = []
+                for x in range(w):
+                    color_val = magnitude_image[y, x]
+                    line.append(f"#{color_val:02x}{color_val:02x}{color_val:02x}")
+                rows_spectrum.append(f"{{{ ' '.join(line) }}}")
+            self.img_inverse_spectrum.put(" ".join(rows_spectrum))
+            
+            # AFISARE REZULTATE (3 imagini)
+            self.curata_ecranul()
+            
+            container = tk.Frame(self)
+            container.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Titlu cu indicare daca e binarizata
+            titlu_text = "Transformata Fourier Inversa (IDFT -> Reconstituire)"
+            if self.fourier_use_binarization:
+                titlu_text += " - BINARIZATA"
+            tk.Label(container, text=titlu_text, font=("Arial", 18, "bold")).pack(pady=10)
+            
+            # Containerul orizontal pentru cele 3 imagini
+            row_frame = tk.Frame(container)
+            row_frame.pack()
+            
+            # Afisam cele 3 imagini
+            for img, titlu in zip([self.img_inverse_original, self.img_inverse_reconstructed, self.img_inverse_spectrum], 
+                                  ["Original (Grayscale)", "Reconstruita (IDFT)", "Spectru de Frecvente"]):
+                f = tk.Frame(row_frame)
+                f.pack(side="left", padx=10)
+                tk.Label(f, image=img).pack()
+                tk.Label(f, text=titlu, font=("Arial", 11, "bold")).pack()
+            
+            info_text = f"Dimensiuni: {w}x{h} px"
+            tk.Label(container, text=info_text, font=("Arial", 12), fg="gray").pack(pady=5)
+            
+            self.adauga_butoane_fourier(is_inverse=True)
+            
+        except Exception as e:
+            self.afiseaza_eroare(str(e))
     
     def aplicare_filtru_mediere(self):
         """Aplica filtru de mediere (averaging filter) cu kernel 3x3."""
