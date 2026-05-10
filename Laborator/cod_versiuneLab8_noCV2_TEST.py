@@ -16,6 +16,7 @@ class Aplicatie(tk.Tk):
         # Setari fereastra
         self.title("Aplicatie Desktop")
         self.geometry("1920x1080")
+        self.state('zoomed')  # Maximizeaza fereastra din start
 
         # Variabile pentru sistem prag adaptiv
         self.prag_utilizator = None  # Pragul ales de utilizator (None = default)
@@ -84,6 +85,9 @@ class Aplicatie(tk.Tk):
         statistica_menu.add_command(label="Histograma Imagine Gri", command=self.afisare_histograma)
         statistica_menu.add_command(label="Egalizare Histograma (Contrast)", command=self.aplicare_egalizare_histograma)
         statistica_menu.add_command(label="Calculare Centru de Masă", command=self.calculare_centru_de_masa)
+        statistica_menu.add_separator()
+        statistica_menu.add_command(label="SNR (o imagine)", command=self.aplicare_snr_o_imagine)
+        statistica_menu.add_command(label="SNR (doua imagini)", command=self.aplicare_snr_doua_imagini_ui)
         tools_menu.add_cascade(label="Statistică", menu=statistica_menu)
         
         # FILTRE
@@ -93,7 +97,10 @@ class Aplicatie(tk.Tk):
         filtre_menu.add_command(label="Filtru Minim (3x3)", command=self.aplicare_filtru_minim)
         filtre_menu.add_command(label="Filtru Maxim (3x3)", command=self.aplicare_filtru_maxim)
         filtre_menu.add_command(label="Filtru Accentuare (3x3)", command=self.aplicare_filtru_accentuare)
+        filtre_menu.add_command(label="Filtru Laplacian", command=self.aplicare_filtru_laplacian)
         filtre_menu.add_command(label="Dithering Floyd-Steinberg", command=self.aplicare_floyd_steinberg)
+        filtre_menu.add_separator()
+        filtre_menu.add_command(label="Eliminare Zgomot Gaussian", command=self.aplicare_eliminare_zgomot_gaussian)
         tools_menu.add_cascade(label="Filtre", menu=filtre_menu)
         
         # MORFOLOGIE
@@ -125,7 +132,7 @@ class Aplicatie(tk.Tk):
         fourier_menu.add_command(label="Transformata Fourier (DFT)", command=self.aplicare_fourier_transform)
         fourier_menu.add_command(label="Transformata Fourier Inversă (IDFT)", command=self.aplicare_inverse_fourier_transform)
         tools_menu.add_cascade(label="Fourier", menu=fourier_menu)
-        
+
         # Il atasam la ACEEASI bara principala, langa File
         bara_principala.add_cascade(label="Tools", menu=tools_menu)
 
@@ -3021,6 +3028,287 @@ class Aplicatie(tk.Tk):
         
         dist = math.sqrt((r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2)
         return dist
+
+    # ==========================================
+    # LABORATOR 8 - Metode de aplicare (UI)
+    # ==========================================
+
+    # Aici sunt doar functiile care apeleaza logica de procesare / filtrare a imaginilor, deci rezulta
+    # in cod semnificativ mai lung, deoarece pentru fiecare logica trebuie o functie extra pentru apelarea acesteia,
+    # insa rezulta intr-un cod mult mai usor de inteles si de modificat pe viitor.
+
+    def aplicare_filtru_laplacian(self):
+        """Aplica filtrul Laplacian si afiseaza rezultatul."""
+        def logica(img):
+            # Apelam functia dedicata pentru executarea transformarii Laplaciene
+            return self.filtru_laplacian(img)
+        # Parametrii: (functia de procesare, titlu fereastra, titlu imagine originala, titlu imagine procesata)
+        self.incarcare_si_procesare_imagine(logica, "Filtru Laplacian", "Original", "Laplacian")
+
+    def aplicare_eliminare_zgomot_gaussian(self):
+        """Aplica eliminarea zgomotului Gaussian si afiseaza rezultatul."""
+        def logica(img):
+            # Aplicam logica de filtrare Gaussiana
+            return self.eliminare_zgomot_gaussian(img)
+        self.incarcare_si_procesare_imagine(logica, "Eliminare Zgomot Gaussian", "Original", "Gaussian Denoised")
+
+    def aplicare_snr_o_imagine(self):
+        """Calculeaza SNR pentru o singura imagine si afiseaza rezultatul intr-un popup."""
+        from tkinter import messagebox
+
+        # Deschide dialogul de selectare fisier si verificam daca ceva a fost incarcat
+        result = self.procesare_imagine()
+        if result is None:
+            return
+        
+        # Calculam valoarea SNR pe baza datelor RGB ale imaginii curente
+        snr = self.calculeaza_snr(self.cv_img_rgb)
+
+        # Afisam rezultatul intr-un popup, formatat cu 4 zecimale
+        messagebox.showinfo("SNR - O Imagine", f"Valoarea SNR: {snr:.4f} dB")
+
+    def aplicare_snr_doua_imagini_ui(self):
+        """Calculeaza SNR intre doua imagini si afiseaza rezultatul intr-un popup."""
+        from tkinter import messagebox
+
+        # Selectam imaginea de referinta (originala)
+        messagebox.showinfo("SNR - Doua Imagini", "Selecteaza PRIMA imagine (imaginea originala).")
+        result1 = self.procesare_imagine()
+        if result1 is None:
+            return
+        imagine1 = self.cv_img_rgb.copy()
+
+        # Selectam imaginea alterata / procesata
+        messagebox.showinfo("SNR - Doua Imagini", "Selecteaza A DOUA imagine (imaginea procesata).")
+        result2 = self.procesare_imagine()
+        if result2 is None:
+            return
+        imagine2 = self.cv_img_rgb.copy()
+
+        # Verificam ca imaginile au aceleasi dimensiuni, rezolutie, etc.
+        if imagine1.shape != imagine2.shape:
+            messagebox.showerror("Eroare", "Cele doua imagini trebuie sa aiba aceleasi dimensiuni!")
+            return
+        
+        # Calculam valoarea SNR comparand cele doua imagini
+        snr = self.calculeaza_snr_doua_imagini(imagine1, imagine2)
+        messagebox.showinfo("SNR - Doua Imagini", f"Valoarea SNR: {snr:.4f} dB")
+
+    def deschide_imagine_doar_date(self):
+        """
+        Deschide un dialog pentru selectarea unei imagini si returneaza
+        array-ul numpy, fara a o afisa pe ecran.
+        """
+        result = self.procesare_imagine()
+        if result is None:
+            return None
+        
+        # Returnam array-ul de pixeli stocat in variabila de instanta
+        return self.cv_img_rgb
+
+    # ==========================================
+    # LABORATOR 8 - Implementari algoritmi
+    # ==========================================
+
+    # ------------------------------------
+    # Pseudocod - Filtru Laplacian:
+    # ------------------------------------
+    # FUNCTIE filtru_laplacian(imagine):
+    #   Defineste masca Laplaciana 3x3:
+    #     [-1, -1, -1]
+    #     [-1,  8, -1]
+    #     [-1, -1, -1]
+    #   Pentru fiecare pixel (x, y) din imagine, ignorand marginile:
+    #     Initializeaza suma = 0
+    #     Pentru fiecare vecin (m, n) din fereastra 3x3:
+    #       Ia valoarea canalului albastru (sau gri) a pixelului vecin
+    #       Aduna la suma: masca[m+1][n+1] * valoare_pixel_vecin
+    #     Taie suma in intervalul [0, 255]
+    #     Seteaza pixelul de iesire ca (suma, suma, suma) => imagine gri
+    #   Returneaza imaginea rezultat
+    # ------------------------------------
+    def filtru_laplacian(self, image):
+        """
+        Aplica filtrul Laplacian pentru detectarea marginilor.
+        Masca folosita: [[-1,-1,-1],[-1,8,-1],[-1,-1,-1]]
+        Produce margini de un singur pixel, eliminand mult zgomot.
+        """
+        h, w = image.shape[:2]
+        # Initializam imaginea rezultat cu 0 (negru)
+        result = np.zeros_like(image, dtype=np.uint8)
+
+        # Coeficientii mastii Laplaciene
+        v = np.array([
+            [-1, -1, -1],
+            [-1,  8, -1],
+            [-1, -1, -1]
+        ], dtype=np.float64)
+
+        # Parcurgem pixelii ignorand marginile
+        for y in range(1, h - 1):
+            for x in range(1, w - 1):
+                suma = 0
+                # Aplicam masca 3x3 pt pixelul curent
+                for m in range(-1, 2):
+                    for n in range(-1, 2):
+                        # Luam canalul albastru pentru calcul
+                        pixel_val = int(image[y + n, x + m, 2])
+                        suma += v[m + 1][n + 1] * pixel_val
+                # Taiem valoarea in intervalul [0, 255]
+                suma = int(np.clip(suma, 0, 255))
+                # Setam pixelul rezultat ca nuanta de gri
+                result[y, x] = [suma, suma, suma]
+
+        return result
+
+    # ------------------------------------
+    # Pseudocod - Eliminare Zgomot Gaussian:
+    # ------------------------------------
+    # FUNCTIE eliminare_zgomot_gaussian(imagine):
+    #   Defineste dimensiunea nucleului = 3, deci raza = 1
+    #   Pentru fiecare pixel (x, y) din imagine:
+    #     Initializeaza sumele R, G, B = 0
+    #     Pentru fiecare vecin (i, j) din fereastra 3x3:
+    #       Calculeaza coordonatele vecinului cu clampare la marginile imaginii
+    #       Aduna valorile R, G, B ale vecinului la sume
+    #     Calculeaza media: R_mediu = sumR / 9, G_mediu = sumG / 9, B_mediu = sumB / 9
+    #     Seteaza pixelul de iesire cu valorile medii
+    #   Returneaza imaginea rezultat
+    # ------------------------------------
+    def eliminare_zgomot_gaussian(self, image):
+        """
+        Elimina zgomotul Gaussian prin medierea pixelilor din vecinatatea 3x3.
+        Echivalent cu un filtru de mediere simplu (box filter).
+        """
+        h, w = image.shape[:2]
+        result = np.zeros_like(image, dtype=np.uint8)
+
+        kernel_size = 3
+        half_kernel = kernel_size // 2
+
+        for y in range(h):
+            for x in range(w):
+                sum_r, sum_g, sum_b = 0, 0, 0
+
+                # Calculam media intensitatilor pixelilor din jur
+                for i in range(-half_kernel, half_kernel + 1):
+                    for j in range(-half_kernel, half_kernel + 1):
+                        # Facem "clamp" coordonatelor de la marginile imaginii
+                        # se aplica celui mai apropiat pixel valid
+                        offset_x = min(max(x + i, 0), w - 1)
+                        offset_y = min(max(y + j, 0), h - 1)
+
+                        sum_r += int(image[offset_y, offset_x, 0])
+                        sum_g += int(image[offset_y, offset_x, 1])
+                        sum_b += int(image[offset_y, offset_x, 2])
+
+                # Calculam media valorilor pixelilor
+                nr_pixeli = kernel_size * kernel_size
+                avg_r = sum_r // nr_pixeli
+                avg_g = sum_g // nr_pixeli
+                avg_b = sum_b // nr_pixeli
+
+                result[y, x] = [avg_r, avg_g, avg_b]
+
+        return result
+
+    # ------------------------------------
+    # Pseudocod - SNR Varianta 1 (o singura imagine):
+    # ------------------------------------
+    # FUNCTIE calculeaza_snr(imagine):
+    #   Pentru fiecare pixel din imagine:
+    #     Ia valoarea canalului rosu ca semnal
+    #     Calculeaza zgomotul = |255 - semnal|
+    #     Aduna semnalul si zgomotul la sumele totale
+    #   Calculeaza media semnalului = suma_semnal / nr_pixeli
+    #   Calculeaza media zgomotului = suma_zgomot / nr_pixeli
+    #   SNR = 10 * log10( media_semnal^2 / media_zgomot^2 )
+    #   Returneaza SNR
+    # ------------------------------------
+    def calculeaza_snr(self, image):
+        """
+        Calculeaza raportul semnal-zgomot (SNR) pentru o singura imagine.
+        Foloseste canalul rosu ca semnal si diferenta fata de 255 ca zgomot.
+        """
+        h, w = image.shape[:2]
+        signal_sum = 0
+        noise_sum = 0
+
+        for y in range(h):
+            for x in range(w):
+                # Canalul rosu ca semnal analizat
+                semnal = int(image[y, x, 0])
+                # Zgomotul = diferenta intre valoarea maxima si valoarea semnalului
+                zgomot = abs(255 - semnal)
+                signal_sum += semnal
+                noise_sum += zgomot
+
+        nr_pixeli = w * h
+        signal_mean = signal_sum / nr_pixeli
+        noise_mean = noise_sum / nr_pixeli
+
+        # Evitam impartirea la zero
+        if noise_mean == 0:
+            return float('inf')
+
+        # Formula SNR in decibeli: 10 * log10(puterea_semnal / puterea_zgomot)
+        snr = 10 * math.log10((signal_mean ** 2) / (noise_mean ** 2))
+        return snr
+
+    # ------------------------------------
+    # Pseudocod - SNR Varianta 2 (doua imagini):
+    # ------------------------------------
+    # FUNCTIE calculeaza_snr_doua_imagini(imagine1, imagine2):
+    #   Pentru fiecare pixel (x, y):
+    #     Ia valoarea RGB a pixelului din imagine1 si imagine2
+    #     semnal = |valoare_rgb1 - valoare_rgb2| (diferenta dintre imagini)
+    #     zgomot = |valoare_rgb1| (valoarea absoluta a primei imagini)
+    #     Aduna la sume totale
+    #   Calculeaza media semnalului si a zgomotului
+    #   SNR = 10 * log10( media_semnal^2 / media_zgomot^2 )
+    #   Returneaza SNR
+    # ------------------------------------
+    def calculeaza_snr_doua_imagini(self, image1, image2):
+        """
+        Calculeaza raportul semnal-zgomot (SNR) comparand doua imagini.
+        Semnalul = diferenta dintre imagini, zgomotul = imaginea originala.
+        Util pentru a masura cat de mult a afectat un filtru imaginea.
+        """
+        h, w = image1.shape[:2]
+        signal_sum = 0
+        noise_sum = 0
+
+        for y in range(h):
+            for x in range(w):
+                # Convertim canalele R, G, B intr-un singur intreg si facem extractie pentru prima imagine
+                r1, g1, b1 = int(image1[y, x, 0]), int(image1[y, x, 1]), int(image1[y, x, 2])
+                # Extractie pentru a doua imagine
+                r2, g2, b2 = int(image2[y, x, 0]), int(image2[y, x, 1]), int(image2[y, x, 2])
+
+                # Recompunem pixelul RGB ca un singur numar pentru a calcula diferenta
+                rgb1 = (r1 << 16) | (g1 << 8) | b1
+                rgb2 = (r2 << 16) | (g2 << 8) | b2
+
+                # Semnalul este diferanta absoluta dintre cele doua imagini
+                semnal = abs(rgb1 - rgb2)
+                # Zgomotul este considerat ca fiind valoarea de referinta din prima imagine
+                zgomot = abs(rgb1)
+
+                signal_sum += semnal
+                noise_sum += zgomot
+
+        nr_pixeli = w * h
+        signal_mean = signal_sum / nr_pixeli
+        noise_mean = noise_sum / nr_pixeli
+
+        # Evitam impartirea la zero
+        if noise_mean == 0:
+            return float('inf')
+
+        # Rezultatul exprimat in decibeli
+        snr = 10 * math.log10((signal_mean ** 2) / (noise_mean ** 2))
+        return snr
+
 
 if __name__ == "__main__":
     app = Aplicatie()
